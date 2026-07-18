@@ -1,4 +1,13 @@
-from bot.database.models import Card, CardType, Character, Contour, ShakeiTransaction
+from collections import defaultdict
+
+from bot.database.models import (
+    Card,
+    CardOwnership,
+    CardType,
+    Character,
+    Contour,
+    ShakeiTransaction,
+)
 from bot.services.character_service import STAT_FIELDS
 
 
@@ -10,10 +19,11 @@ def format_limit(card: Card, live_copies: int | None = None) -> str:
 
 
 def card_short(card: Card) -> str:
-    """Краткая карточка для чата: ?!карта."""
+    """Краткая карточка для чата: ?карта."""
     slot = f"№{card.number} " if card.number is not None else ""
     lines = [
         f"🃏 {slot}{card.name} [{card.rarity.value}]",
+        f"ID карты в БД: #{card.id}",
         f"Тип: {card.card_type.value}",
         f"Преобразования: {format_limit(card)}",
     ]
@@ -40,7 +50,7 @@ def card_full(card: Card, live_copies: int | None = None) -> str:
         lines.append(f"\nОписание:\n{card.description}")
     if card.usage:
         lines.append(f"\nСпособ использования:\n{card.usage}")
-    lines.append(f"\nID в реестре: {card.id}")
+    lines.append(f"\nID карты в БД: #{card.id}")
     return "\n".join(lines)
 
 
@@ -57,15 +67,16 @@ def card_list(cards: list[Card]) -> str:
 def character_profile(
     character: Character,
     cards: list[Card] | None = None,
-    contours: list[Contour] | None = None,
+    _private_contours: list[Contour] | None = None,
 ) -> str:
-    """Анкета персонажа."""
+    """Публичная часть анкеты; Контуры намеренно никогда не форматируются здесь."""
     header = "❖ Основное"
     if not character.is_approved:
         header += "\n(анкета не подтверждена)"
 
     lines = [
         header,
+        f"ID анкеты в БД: #{character.id}",
         f"\n➤ Имя персонажа\n{character.name}",
         f"\n➤ Возраст\n{character.age if character.age is not None else '—'}",
         f"\n➤ Пол\n{character.gender or '—'}",
@@ -88,17 +99,12 @@ def character_profile(
     if cards is not None:
         lines.append("")
         if cards:
-            lines.append("Карты: " + ", ".join(card.name for card in cards))
+            lines.append(
+                "Карты: "
+                + ", ".join(f"#{card.id} · {card.name}" for card in cards)
+            )
         else:
             lines.append("Карты: нет")
-
-    if contours is not None:
-        lines.append("\n⌬ Контуры")
-        if contours:
-            for contour in contours:
-                lines.append(format_contour(contour))
-        else:
-            lines.append("Оба слота пусты.")
 
     if character.additional:
         lines.append(f"\n❦ Дополнительно\n{_truncate(character.additional, 900)}")
@@ -107,9 +113,29 @@ def character_profile(
 
 
 def format_contour(contour: Contour) -> str:
-    lines = [f"\n⌬ Слот {contour.slot}: {contour.name}"]
+    components = list(contour.components)
+    lines = [
+        f"⌬ Слот {contour.slot}: {contour.name}",
+        f"ID Контура: #{contour.id}",
+        f"Карты: {len(components)}/{contour.card_capacity}",
+    ]
+    if components:
+        lines.append(
+            "Состав: "
+            + " + ".join(
+                f"#{component.ownership.card.id} · {component.ownership.card.name}"
+                for component in components
+            )
+        )
+    elif contour.composition:
+        lines.extend(
+            (
+                f"Старый состав: {contour.composition}",
+                "⚠ Карты ещё не привязаны к физическим копиям. Администратору "
+                "нужно пересобрать состав.",
+            )
+        )
     fields = (
-        ("Состав", contour.composition),
         ("Внешний вид", contour.appearance),
         ("Основной эффект", contour.primary_effect),
         ("Дополнительные возможности", contour.additional_capabilities),
@@ -119,6 +145,40 @@ def format_contour(contour: Contour) -> str:
         ("Влияние на Перегрузку", contour.overload_impact),
     )
     lines.extend(f"{title}: {_truncate(value, 500)}" for title, value in fields if value)
+    return "\n".join(lines)
+
+
+def character_card_holdings(ownerships: list[CardOwnership]) -> str:
+    if not ownerships:
+        return "Карт пока нет."
+    grouped: dict[int, list[CardOwnership]] = defaultdict(list)
+    for ownership in ownerships:
+        grouped[ownership.card_id].append(ownership)
+    lines = []
+    for items in grouped.values():
+        card = items[0].card
+        bound = sum(item.contour_component is not None for item in items)
+        lines.append(
+            f"#{card.id} · {card.name} [{card.rarity.value}] — "
+            f"всего {len(items)}, свободно {len(items) - bound}, связано {bound}"
+        )
+    return "\n".join(lines)
+
+
+def card_owner_holdings(ownerships: list[CardOwnership]) -> str:
+    if not ownerships:
+        return "Этой карты пока ни у кого нет."
+    grouped: dict[int, list[CardOwnership]] = defaultdict(list)
+    for ownership in ownerships:
+        grouped[ownership.character_id].append(ownership)
+    lines = []
+    for items in grouped.values():
+        character = items[0].character
+        bound = sum(item.contour_component is not None for item in items)
+        lines.append(
+            f"#{character.id} · {character.name} — всего {len(items)}, "
+            f"свободно {len(items) - bound}, связано {bound}"
+        )
     return "\n".join(lines)
 
 

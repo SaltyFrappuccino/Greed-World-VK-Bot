@@ -3,7 +3,6 @@ from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
-from bot.database.crud import contours as contours_crud
 from bot.database.engine import get_session
 from bot.keyboards.main_menu import (
     back_to_menu,
@@ -52,11 +51,11 @@ async def show_character(
             await message.answer("Анкета не найдена.", keyboard=back_to_menu())
             return
         cards = await cards_crud.list_character_cards(session, character.id)
-        contours = await contours_crud.list_for_character(session, character.id)
         text = (
-            f"ID анкеты: #{character.id}\nВладелец: VK {character.vk_id}\n\n"
-            + formatters.character_profile(character, cards, contours)
+            f"Владелец: VK {character.vk_id}\n\n"
+            + formatters.character_profile(character, cards)
         )
+        can_view_contours = is_admin or character.vk_id == message.from_id
 
     await clear_state(message.peer_id)
     await answer_long(
@@ -66,6 +65,7 @@ async def show_character(
             character.id,
             page,
             is_admin=is_admin,
+            can_view_contours=can_view_contours,
         ),
     )
 
@@ -102,7 +102,10 @@ async def _show_registry_page(
     else:
         text = "Реестр анкет пока пуст."
     await message.answer(
-        text, keyboard=character_registry_menu(characters, page, pages)
+        text,
+        keyboard=character_registry_menu(
+            characters, page, pages, is_admin=is_admin
+        ),
     )
 
 

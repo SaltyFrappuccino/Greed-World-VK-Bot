@@ -3,7 +3,7 @@ import json
 import pytest
 
 from bot.handlers.dm.menu import cancel
-from bot.states import AdminCardState, state_dispenser
+from bot.states import AdminCardState, AdminCharacterState, state_dispenser
 
 
 class _Message:
@@ -17,7 +17,7 @@ class _Message:
 
 
 @pytest.mark.asyncio
-async def test_cancel_from_admin_state_returns_admin_keyboard():
+async def test_cancel_from_card_state_returns_cards_section():
     message = _Message()
     await state_dispenser.set(message.peer_id, AdminCardState.TYPE)
 
@@ -26,6 +26,25 @@ async def test_cancel_from_admin_state_returns_admin_keyboard():
     text, kwargs = message.answers[-1]
     keyboard = json.loads(kwargs["keyboard"])
     labels = [button["action"]["label"] for row in keyboard["buttons"] for button in row]
-    assert "админ-панель" in text.lower()
+    assert "карты" in text.lower()
     assert "Добавить карту" in labels
+    assert await state_dispenser.get(message.peer_id) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_from_character_state_returns_characters_section():
+    message = _Message()
+    await state_dispenser.set(message.peer_id, AdminCharacterState.OWNER)
+
+    await cancel(message, is_admin=True)
+
+    text, kwargs = message.answers[-1]
+    keyboard = json.loads(kwargs["keyboard"])
+    labels = [
+        button["action"]["label"]
+        for row in keyboard["buttons"]
+        for button in row
+    ]
+    assert "анкеты" in text.lower()
+    assert "Добавить анкету" in labels
     assert await state_dispenser.get(message.peer_id) is None

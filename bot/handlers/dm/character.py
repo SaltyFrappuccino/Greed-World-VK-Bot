@@ -3,7 +3,6 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
-from bot.database.crud import contours as contours_crud
 from bot.database.engine import get_session
 from bot.database.models import Character
 from bot.keyboards.main_menu import (
@@ -69,8 +68,8 @@ async def my_cards(message: Message, is_admin: bool = False, **_: object) -> Non
             await message.answer(str(error), keyboard=back_to_menu())
             return
 
-        cards = await cards_crud.list_character_cards(session, character.id)
-        text = formatters.card_list(cards) if cards else "Карт пока нет."
+        ownerships = await cards_crud.list_character_ownerships(session, character.id)
+        text = formatters.character_card_holdings(ownerships)
         await message.answer(
             f"Карты персонажа {character.name}:\n\n{text}",
             keyboard=profile_menu(character.id, is_admin=is_admin),
@@ -93,9 +92,8 @@ async def _show_character(
     is_admin: bool,
 ) -> None:
     cards = await cards_crud.list_character_cards(session, character.id)
-    contours = await contours_crud.list_for_character(session, character.id)
     await answer_long(
         message,
-        formatters.character_profile(character, cards, contours),
+        formatters.character_profile(character, cards),
         keyboard=profile_menu(character.id, is_admin=is_admin),
     )

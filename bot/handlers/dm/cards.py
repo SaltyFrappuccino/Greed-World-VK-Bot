@@ -20,14 +20,20 @@ labeler.vbml_ignore_case = True
 
 
 @labeler.message(payload={"cmd": "cards"})
-async def show_registry(message: Message, **_: object) -> None:
-    await _show_registry_page(message, 0)
+async def show_registry(
+    message: Message, is_admin: bool = False, **_: object
+) -> None:
+    await _show_registry_page(message, 0, is_admin=is_admin)
 
 
 @labeler.message(payload_contains={"cmd": "cards_page"})
-async def show_registry_page(message: Message, **_: object) -> None:
+async def show_registry_page(
+    message: Message, is_admin: bool = False, **_: object
+) -> None:
     payload = message.get_payload_json() or {}
-    await _show_registry_page(message, _page_from_payload(payload))
+    await _show_registry_page(
+        message, _page_from_payload(payload), is_admin=is_admin
+    )
 
 
 @labeler.message(payload_contains={"cmd": "card_registry_view"})
@@ -104,7 +110,9 @@ async def search(message: Message, is_admin: bool = False, **_: object) -> None:
         )
 
 
-async def _show_registry_page(message: Message, requested_page: int) -> None:
+async def _show_registry_page(
+    message: Message, requested_page: int, *, is_admin: bool
+) -> None:
     async with get_session() as session:
         total = await cards_crud.count_cards(session)
         page, pages = normalize_page(requested_page, total)
@@ -125,7 +133,10 @@ async def _show_registry_page(message: Message, requested_page: int) -> None:
         )
     else:
         text = "Реестр карт пока пуст."
-    await message.answer(text, keyboard=card_registry_menu(cards, page, pages))
+    await message.answer(
+        text,
+        keyboard=card_registry_menu(cards, page, pages, is_admin=is_admin),
+    )
 
 
 def _page_from_payload(payload: dict[str, object]) -> int:

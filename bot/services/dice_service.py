@@ -27,20 +27,20 @@ def roll(low: int = DEFAULT_MIN, high: int = DEFAULT_MAX, *, rng: random.Random 
 
 
 def parse_bounds(args: str) -> tuple[int, int]:
-    """Разбор аргументов «?!кубик», «?!кубик 6», «?!кубик 1 20»."""
+    """Разбор аргументов «?кубик», «?кубик 6», «?кубик 1 20»."""
     parts = args.split()
     if not parts:
         return DEFAULT_MIN, DEFAULT_MAX
     if len(parts) > 2:
         raise ValidationError(
-            "Укажите не больше двух границ: «?!кубик», «?!кубик 6» или «?!кубик 1 20»."
+            "Укажите не больше двух границ: «?кубик», «?кубик 6» или «?кубик 1 20»."
         )
 
     try:
         numbers = [int(part) for part in parts[:2]]
     except ValueError:
         raise ValidationError(
-            "Кубик понимает только числа: «?!кубик», «?!кубик 6» или «?!кубик 1 20»."
+            "Кубик понимает только числа: «?кубик», «?кубик 6» или «?кубик 1 20»."
         ) from None
 
     if len(numbers) == 1:

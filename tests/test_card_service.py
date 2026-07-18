@@ -96,3 +96,22 @@ async def test_card_search_is_case_insensitive_for_cyrillic(session):
     card = await card_service.find_card(session, "тЕсТоВаЯ кАрТа")
 
     assert card.name == "Тестовая Карта"
+
+
+@pytest.mark.asyncio
+async def test_character_can_hold_several_physical_copies_of_same_card(session):
+    character = await characters_crud.create(session, vk_id=1, name="Ава")
+    card = await card_service.create_card(
+        session,
+        name="Пепел",
+        kind="Обычная",
+        rarity=Rarity.H,
+        admin_vk_id=99,
+        transform_limit=3,
+    )
+
+    first = await card_service.grant_card(session, card.id, character.id)
+    second = await card_service.grant_card(session, card.id, character.id)
+
+    assert first.id != second.id
+    assert await cards_crud.count_owners(session, card.id) == 2

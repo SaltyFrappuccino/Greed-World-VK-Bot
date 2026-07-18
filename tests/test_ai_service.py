@@ -19,6 +19,19 @@ class _FakeCompletions:
         )
 
 
+class _SequenceCompletions:
+    def __init__(self, contents):
+        self.contents = list(contents)
+        self.requests = []
+
+    async def create(self, **kwargs):
+        self.requests.append(kwargs)
+        content = self.contents.pop(0)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+
+
 class _FakeClient:
     def __init__(self, completions):
         self.chat = SimpleNamespace(completions=completions)
@@ -52,10 +65,16 @@ async def test_character_generation_uses_strict_json_schema(monkeypatch):
         ensure_ascii=False,
     )
     completions = _FakeCompletions(content)
-    monkeypatch.setenv("AITUNNEL_API_KEY", "test-key")
-    monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
-    )
+    client_kwargs = {}
+
+    def make_client(**kwargs):
+        client_kwargs.update(kwargs)
+        return _FakeClient(completions)
+
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("DSLAB_VISION_MODEL", "gemini-2.5-flash-lite")
+    monkeypatch.setattr(ai_service, "AsyncOpenAI", make_client)
     get_settings.cache_clear()
 
     draft = await ai_service.generate_character(
@@ -63,20 +82,142 @@ async def test_character_generation_uses_strict_json_schema(monkeypatch):
     )
 
     assert draft.name == "Ава"
-    assert completions.request["model"] == "gemini-3.1-flash-lite"
+    assert client_kwargs == {
+        "api_key": "test-key",
+        "base_url": "https://api.dslab.tech/v1",
+    }
+    assert completions.request["model"] == "gemini-2.5-flash-lite"
+    assert completions.request["temperature"] == 0
     response_format = completions.request["response_format"]
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["strict"] is True
     assert response_format["json_schema"]["schema"]["additionalProperties"] is False
     messages = completions.request["messages"]
     assert "Запрещено добавлять факты" in messages[0]["content"]
-    assert messages[1]["content"][0] == {
-        "type": "text",
-        "text": "Исходная анкета",
-    }
+    assert "<SOURCE>\nИсходная анкета\n</SOURCE>" in messages[1]["content"][0]["text"]
     assert messages[1]["content"][1]["image_url"]["url"].endswith(
         "appearance.jpg"
     )
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_text_character_generation_uses_deepseek(monkeypatch):
+    content = json.dumps(
+        {
+            "name": "",
+            "age": 30,
+            "gender": "Женский",
+            "appearance": "",
+            "personality": "",
+            "biography": "",
+            "stress_resistance": 5,
+            "speech": 4,
+            "intuition": 3,
+            "spine": 2,
+            "will": 5,
+            "scent": 4,
+            "skills": [],
+            "additional": "",
+        },
+        ensure_ascii=False,
+    )
+    completions = _FakeCompletions(content)
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("DSLAB_VISION_MODEL", "gemini-2.5-flash-lite")
+    monkeypatch.setattr(
+        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    draft = await ai_service.generate_character("Имя персонажа: Ава")
+
+    assert draft.name == "Ава"
+    assert completions.request["model"] == "deepseek-v4-flash"
+    assert isinstance(completions.request["messages"][1]["content"], str)
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_character_generation_restores_omitted_labeled_section(monkeypatch):
+    base = {
+        "name": "Ава",
+        "age": 30,
+        "gender": "Женский",
+        "appearance": "",
+        "personality": "Спокойная",
+        "biography": "",
+        "stress_resistance": 5,
+        "speech": 4,
+        "intuition": 3,
+        "spine": 2,
+        "will": 5,
+        "scent": 4,
+        "skills": [],
+        "additional": "",
+    }
+    completions = _SequenceCompletions([json.dumps(base, ensure_ascii=False)])
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setattr(
+        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    draft = await ai_service.generate_character(
+        """➤ Внешность
+（Как персонаж выглядел дома и как выглядит сейчас.）
+Высокая, носит белый плащ.
+
+✎ Характер
+Спокойная"""
+    )
+
+    assert draft.appearance == "Высокая, носит белый плащ."
+    assert len(completions.requests) == 1
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_character_generation_retries_missing_image_description(monkeypatch):
+    base = {
+        "name": "Ава",
+        "age": 30,
+        "gender": "Женский",
+        "appearance": "",
+        "personality": "",
+        "biography": "",
+        "stress_resistance": 5,
+        "speech": 4,
+        "intuition": 3,
+        "spine": 2,
+        "will": 5,
+        "scent": 4,
+        "skills": [],
+        "additional": "",
+    }
+    repaired = {**base, "appearance": "Высокая, носит белый плащ."}
+    completions = _SequenceCompletions(
+        [json.dumps(base, ensure_ascii=False), json.dumps(repaired, ensure_ascii=False)]
+    )
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("DSLAB_VISION_MODEL", "gemini-2.5-flash-lite")
+    monkeypatch.setattr(
+        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    draft = await ai_service.generate_character(
+        "Имя: Ава", image_urls=["https://example.com/appearance.jpg"]
+    )
+
+    assert draft.appearance == "Высокая, носит белый плащ."
+    assert len(completions.requests) == 2
+    assert "Внешность по изображению" in completions.requests[1]["messages"][1][
+        "content"
+    ][0]["text"]
     get_settings.cache_clear()
 
 
@@ -100,3 +241,40 @@ def test_character_fields_rejects_stats_missing_from_source():
 
     with pytest.raises(ai_service.ValidationError, match="не указаны статы"):
         ai_service.character_fields(draft)
+
+
+@pytest.mark.asyncio
+async def test_contour_ai_cannot_change_selected_cards(monkeypatch):
+    content = json.dumps(
+        {
+            "name": "Грозовой покров",
+            "appearance": "Искры вокруг тела",
+            "primary_effect": "Покрывает тело электричеством",
+            "additional_capabilities": "",
+            "activation_conditions": "Назвать Контур",
+            "duration": "Одна сцена",
+            "conductivity": "1",
+            "overload_impact": "Поднимает Перегрузку",
+        },
+        ensure_ascii=False,
+    )
+    completions = _FakeCompletions(content)
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setattr(
+        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    draft = await ai_service.generate_contour(
+        "Сделай защитную способность",
+        "Имя: Ава",
+        "Карта #1: Покров\nКарта #2: Молния",
+    )
+
+    assert draft.name == "Грозовой покров"
+    schema = completions.request["response_format"]["json_schema"]["schema"]
+    assert "composition" not in schema["properties"]
+    messages = completions.request["messages"]
+    assert "Запрещено добавлять, заменять" in messages[0]["content"]
+    assert "Карта #1: Покров" in messages[1]["content"]
+    get_settings.cache_clear()

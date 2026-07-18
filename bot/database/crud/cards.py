@@ -1,7 +1,15 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from bot.database.models import Card, CardOwnership, CardType, Character, Rarity
+from bot.database.models import (
+    Card,
+    CardOwnership,
+    CardType,
+    Character,
+    ContourComponent,
+    Rarity,
+)
 
 
 async def get_by_id(session: AsyncSession, card_id: int) -> Card | None:
@@ -95,6 +103,41 @@ async def get_ownership(
         CardOwnership.card_id == card_id,
         CardOwnership.character_id == character_id,
     )
+    return await session.scalar(stmt.order_by(CardOwnership.id))
+
+
+async def get_ownership_by_id(
+    session: AsyncSession, ownership_id: int
+) -> CardOwnership | None:
+    stmt = (
+        select(CardOwnership)
+        .where(CardOwnership.id == ownership_id)
+        .options(
+            selectinload(CardOwnership.card),
+            selectinload(CardOwnership.contour_component).selectinload(
+                ContourComponent.contour
+            ),
+        )
+    )
+    return await session.scalar(stmt)
+
+
+async def get_free_ownership(
+    session: AsyncSession, card_id: int, character_id: int
+) -> CardOwnership | None:
+    stmt = (
+        select(CardOwnership)
+        .outerjoin(
+            ContourComponent,
+            ContourComponent.card_ownership_id == CardOwnership.id,
+        )
+        .where(
+            CardOwnership.card_id == card_id,
+            CardOwnership.character_id == character_id,
+            ContourComponent.id.is_(None),
+        )
+        .order_by(CardOwnership.id)
+    )
     return await session.scalar(stmt)
 
 
@@ -120,11 +163,61 @@ async def list_character_cards(session: AsyncSession, character_id: int) -> list
     return list(await session.scalars(stmt))
 
 
+async def list_character_ownerships(
+    session: AsyncSession, character_id: int
+) -> list[CardOwnership]:
+    stmt = (
+        select(CardOwnership)
+        .where(CardOwnership.character_id == character_id)
+        .join(Card, Card.id == CardOwnership.card_id)
+        .options(
+            selectinload(CardOwnership.card),
+            selectinload(CardOwnership.contour_component).selectinload(
+                ContourComponent.contour
+            ),
+        )
+        .order_by(Card.name, CardOwnership.id)
+    )
+    return list(await session.scalars(stmt))
+
+
+async def list_card_ownerships(
+    session: AsyncSession, card_id: int
+) -> list[CardOwnership]:
+    stmt = (
+        select(CardOwnership)
+        .where(CardOwnership.card_id == card_id)
+        .join(Character, Character.id == CardOwnership.character_id)
+        .options(
+            selectinload(CardOwnership.character),
+            selectinload(CardOwnership.contour_component).selectinload(
+                ContourComponent.contour
+            ),
+        )
+        .order_by(Character.name, CardOwnership.id)
+    )
+    return list(await session.scalars(stmt))
+
+
+async def count_bound_ownerships(session: AsyncSession, card_id: int) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(ContourComponent)
+        .join(
+            CardOwnership,
+            CardOwnership.id == ContourComponent.card_ownership_id,
+        )
+        .where(CardOwnership.card_id == card_id)
+    )
+    return await session.scalar(stmt) or 0
+
+
 async def list_card_owners(session: AsyncSession, card_id: int) -> list[Character]:
     stmt = (
         select(Character)
         .join(CardOwnership, CardOwnership.character_id == Character.id)
         .where(CardOwnership.card_id == card_id)
         .order_by(Character.name)
+        .distinct()
     )
     return list(await session.scalars(stmt))

@@ -1,4 +1,4 @@
-def test_chat_handlers_use_question_exclamation_prefix(monkeypatch):
+def test_chat_handlers_use_question_mark_prefix(monkeypatch):
     monkeypatch.setenv("VK_COMMUNITY_TOKEN", "test")
     monkeypatch.setenv("VK_GROUP_ID", "1")
 
@@ -13,16 +13,16 @@ def test_chat_handlers_use_question_exclamation_prefix(monkeypatch):
         for pattern in rule.patterns
     ]
     expected = {
-        "?!карта",
-        "?!карта Ясень",
-        "?!профиль",
-        "?!профиль Ава",
-        "?!кубик",
-        "?!кубик 1 20",
-        "?!помощь",
+        "?карта",
+        "?карта Ясень",
+        "?профиль",
+        "?профиль Ава",
+        "?кубик",
+        "?кубик 1 20",
+        "?помощь",
     }
 
     for command in expected:
         assert any(pattern.compiler.fullmatch(command) for pattern in patterns)
 
-    assert not any(pattern.compiler.fullmatch("!карта Ясень") for pattern in patterns)
+    assert not any(pattern.compiler.fullmatch("?!карта Ясень") for pattern in patterns)

@@ -5,7 +5,13 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.engine import get_session
-from bot.keyboards.admin_menu import admin_menu, back_to_admin
+from bot.keyboards.admin_menu import (
+    admin_cards_menu,
+    admin_character_add_menu,
+    admin_characters_menu,
+    admin_menu,
+    back_to_admin,
+)
 from bot.middlewares.auth import AdminRule
 from bot.services import backup_service, character_service
 from bot.services.errors import ServiceError
@@ -21,6 +27,26 @@ logger = logging.getLogger(__name__)
 async def show_admin_menu(message: Message, **_: object) -> None:
     await clear_state(message.peer_id)
     await message.answer("Админ-панель:", keyboard=admin_menu())
+
+
+@labeler.message(payload={"cmd": "admin_characters"})
+async def show_characters_menu(message: Message, **_: object) -> None:
+    await clear_state(message.peer_id)
+    await message.answer("Анкеты:", keyboard=admin_characters_menu())
+
+
+@labeler.message(payload={"cmd": "admin_character_add_menu"})
+async def show_character_add_menu(message: Message, **_: object) -> None:
+    await clear_state(message.peer_id)
+    await message.answer(
+        "Как добавить анкету?", keyboard=admin_character_add_menu()
+    )
+
+
+@labeler.message(payload={"cmd": "admin_cards"})
+async def show_cards_menu(message: Message, **_: object) -> None:
+    await clear_state(message.peer_id)
+    await message.answer("Карты:", keyboard=admin_cards_menu())
 
 
 @labeler.message(payload={"cmd": "admin_database_backup"})
@@ -68,12 +94,12 @@ async def pending_profiles(message: Message, **_: object) -> None:
     await message.answer(
         "Ждут подтверждения:\n\n"
         + "\n".join(lines)
-        + "\n\nПодтвердить: ?!подтвердить <id>",
+        + "\n\nПодтвердить: ?подтвердить <id>",
         keyboard=back_to_admin(),
     )
 
 
-@labeler.message(text="?!подтвердить <character_id>")
+@labeler.message(text="?подтвердить <character_id>")
 async def approve_profile(message: Message, character_id: str, **_: object) -> None:
     async with get_session() as session:
         try:

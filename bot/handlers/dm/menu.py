@@ -1,7 +1,7 @@
 from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
-from bot.keyboards.admin_menu import admin_menu
+from bot.keyboards.admin_menu import admin_cards_menu, admin_characters_menu
 from bot.keyboards.main_menu import main_menu
 from bot.middlewares.auth import NotAdminRule
 from bot.states import clear_state, state_dispenser
@@ -13,7 +13,7 @@ labeler.vbml_ignore_case = True
 GREETING = """Жадный Мир на связи.
 
 Здесь - анкета, реестр карт и Шакеи.
-Кубик и быстрые команды (?!карта, ?!профиль, ?!кубик) работают в общей беседе."""
+Кубик и быстрые команды (?карта, ?профиль, ?кубик) работают в общей беседе."""
 
 
 @labeler.message(payload={"cmd": "menu"})
@@ -26,14 +26,18 @@ async def show_menu(message: Message, is_admin: bool = False, **_: object) -> No
 @labeler.message(payload={"cmd": "cancel"})
 async def cancel(message: Message, is_admin: bool = False, **_: object) -> None:
     current_state = await state_dispenser.get(message.peer_id)
-    return_to_admin = bool(
-        is_admin
-        and current_state is not None
-        and current_state.state.startswith("Admin")
-    )
+    state_name = current_state.state if current_state is not None else ""
     await clear_state(message.peer_id)
-    if return_to_admin:
-        await message.answer("Отменено. Возвращаю в админ-панель.", keyboard=admin_menu())
+    if is_admin and state_name.startswith("AdminCardState"):
+        await message.answer(
+            "Отменено. Возвращаю в раздел «Карты».",
+            keyboard=admin_cards_menu(),
+        )
+    elif is_admin and state_name.startswith("Admin"):
+        await message.answer(
+            "Отменено. Возвращаю в раздел «Анкеты».",
+            keyboard=admin_characters_menu(),
+        )
     else:
         await message.answer("Отменено.", keyboard=main_menu(is_admin))
 

@@ -10,6 +10,10 @@ class ValidationError(ServiceError):
     pass
 
 
+class PermissionDenied(ServiceError):
+    pass
+
+
 class TransformLimitReached(ServiceError):
     pass
 

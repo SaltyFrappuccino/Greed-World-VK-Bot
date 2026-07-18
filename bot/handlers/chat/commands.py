@@ -2,7 +2,6 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
-from bot.database.crud import contours as contours_crud
 from bot.database.engine import get_session
 from bot.services import card_service, character_service
 from bot.services.errors import ServiceError
@@ -16,28 +15,28 @@ labeler.vbml_ignore_case = True
 
 HELP_TEXT = """Команды Жадного Мира:
 
-?!карта [название] — карточка из реестра (можно по номеру Особого слота)
-?!профиль — своя анкета
-?!профиль Имя — чужая анкета (или ответом/упоминанием)
-?!кубик — бросок 1–20
-?!кубик 6 — бросок 1–6
-?!кубик 1 20 — бросок в своих границах
-?!помощь — этот список
+?карта [название] — карточка из реестра (можно по номеру Особого слота)
+?профиль — своя анкета
+?профиль Имя или ID — чужая анкета (или ответом/упоминанием)
+?кубик — бросок 1–20
+?кубик 6 — бросок 1–6
+?кубик 1 20 — бросок в своих границах
+?помощь — этот список
 
 Всё остальное - в личных сообщениях сообщества."""
 
 
-@labeler.message(text=["?!помощь", "?!помощь <_>"])
+@labeler.message(text=["?помощь", "?помощь <_>"])
 async def help_command(message: Message, **_: object) -> None:
     await message.answer(HELP_TEXT)
 
 
-@labeler.message(text="?!карта")
+@labeler.message(text="?карта")
 async def card_without_query(message: Message, **_: object) -> None:
-    await message.answer("Укажите название: ?!карта Ясень")
+    await message.answer("Укажите название: ?карта Ясень")
 
 
-@labeler.message(text="?!карта <query>")
+@labeler.message(text="?карта <query>")
 async def card_command(message: Message, query: str, **_: object) -> None:
     async with get_session() as session:
         try:
@@ -52,7 +51,7 @@ async def card_command(message: Message, query: str, **_: object) -> None:
         await message.answer(formatters.card_short(card))
 
 
-@labeler.message(text=["?!профиль", "?!анкета"])
+@labeler.message(text=["?профиль", "?анкета"])
 async def own_profile(message: Message, **_: object) -> None:
     async with get_session() as session:
         characters = await character_service.list_by_vk_id(session, message.from_id)
@@ -60,30 +59,30 @@ async def own_profile(message: Message, **_: object) -> None:
             await message.answer("У вас нет анкет. Обратитесь к администратору.")
             return
         if len(characters) > 1:
-            names = ", ".join(character.name for character in characters)
+            names = ", ".join(
+                f"#{character.id} · {character.name}" for character in characters
+            )
             await message.answer(
-                f"Ваши персонажи: {names}. Используйте ?!профиль Имя."
+                f"Ваши персонажи: {names}. Используйте ?профиль ID или ?профиль Имя."
             )
             return
 
         character = characters[0]
         cards = await cards_crud.list_character_cards(session, character.id)
-        contours = await contours_crud.list_for_character(session, character.id)
-        await answer_long(message, formatters.character_profile(character, cards, contours))
+        await answer_long(message, formatters.character_profile(character, cards))
 
 
-@labeler.message(text=["?!профиль <query>", "?!анкета <query>"])
+@labeler.message(text=["?профиль <query>", "?анкета <query>"])
 async def other_profile(message: Message, query: str, **_: object) -> None:
     async with get_session() as session:
         try:
             character = await _resolve_target(session, message, query)
             cards = await cards_crud.list_character_cards(session, character.id)
-            contours = await contours_crud.list_for_character(session, character.id)
         except ServiceError as error:
             await message.answer(str(error))
             return
 
-        await answer_long(message, formatters.character_profile(character, cards, contours))
+        await answer_long(message, formatters.character_profile(character, cards))
 
 
 async def _resolve_target(session, message: Message, query: str):

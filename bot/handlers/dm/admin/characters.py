@@ -7,7 +7,7 @@ from bot.database.crud import contours as contours_crud
 from bot.database.engine import get_session
 from bot.keyboards.admin_menu import (
     admin_character_edit_menu,
-    back_to_admin,
+    back_to_admin_characters,
     confirm_menu,
 )
 from bot.keyboards.main_menu import cancel, character_select_menu
@@ -78,7 +78,7 @@ async def save_character(message: Message, **_: object) -> None:
     await clear_state(message.peer_id)
     await message.answer(
         f"Анкета «{character.name}» добавлена владельцу VK {owner_vk_id}.",
-        keyboard=back_to_admin(),
+        keyboard=back_to_admin_characters(),
     )
 
 
@@ -101,7 +101,7 @@ async def select_character_edit(message: Message, **_: object) -> None:
     try:
         character_id = parse_positive_int(str(payload.get("id", "")), field="ID анкеты")
     except ServiceError as error:
-        await message.answer(str(error), keyboard=back_to_admin())
+        await message.answer(str(error), keyboard=back_to_admin_characters())
         return
     await _show_character_editor(message, character_id)
 
@@ -114,7 +114,7 @@ async def select_character_delete(message: Message, **_: object) -> None:
             str(payload.get("id", "")), field="ID анкеты"
         )
     except ServiceError as error:
-        await message.answer(str(error), keyboard=back_to_admin())
+        await message.answer(str(error), keyboard=back_to_admin_characters())
         return
     await _show_character_delete_confirmation(message, character_id)
 
@@ -129,11 +129,12 @@ async def confirm_character_delete(message: Message, **_: object) -> None:
         async with get_session() as session:
             name = await character_service.delete_character(session, character_id)
     except ServiceError as error:
-        await message.answer(str(error), keyboard=back_to_admin())
+        await message.answer(str(error), keyboard=back_to_admin_characters())
         return
     await clear_state(message.peer_id)
     await message.answer(
-        f"Анкета #{character_id} · {name} удалена.", keyboard=back_to_admin()
+        f"Анкета #{character_id} · {name} удалена.",
+        keyboard=back_to_admin_characters(),
     )
 
 
@@ -142,18 +143,22 @@ async def select_character_field(message: Message, **_: object) -> None:
     payload = message.get_payload_json() or {}
     field = str(payload.get("field", ""))
     if field not in _ADMIN_EDITABLE_FIELDS:
-        await message.answer("Это поле редактировать нельзя.", keyboard=back_to_admin())
+        await message.answer(
+            "Это поле редактировать нельзя.", keyboard=back_to_admin_characters()
+        )
         return
     try:
         character_id = parse_positive_int(str(payload.get("id", "")), field="ID анкеты")
     except ServiceError as error:
-        await message.answer(str(error), keyboard=back_to_admin())
+        await message.answer(str(error), keyboard=back_to_admin_characters())
         return
 
     async with get_session() as session:
         character = await characters_crud.get_by_id(session, character_id)
         if character is None:
-            await message.answer("Анкета не найдена.", keyboard=back_to_admin())
+            await message.answer(
+                "Анкета не найдена.", keyboard=back_to_admin_characters()
+            )
             return
         current = getattr(character, field)
         if hasattr(current, "value"):
@@ -254,7 +259,9 @@ async def _show_character_editor(message: Message, character_id: int) -> None:
     async with get_session() as session:
         character = await characters_crud.get_by_id(session, character_id)
         if character is None:
-            await message.answer("Анкета не найдена.", keyboard=back_to_admin())
+            await message.answer(
+                "Анкета не найдена.", keyboard=back_to_admin_characters()
+            )
             return
         name = character.name
         owner_vk_id = character.vk_id
@@ -273,7 +280,9 @@ async def _show_character_delete_confirmation(
     async with get_session() as session:
         character = await characters_crud.get_by_id(session, character_id)
         if character is None:
-            await message.answer("Анкета не найдена.", keyboard=back_to_admin())
+            await message.answer(
+                "Анкета не найдена.", keyboard=back_to_admin_characters()
+            )
             return
         cards = await cards_crud.list_character_cards(session, character.id)
         contours = await contours_crud.list_for_character(session, character.id)
@@ -289,7 +298,11 @@ async def _show_character_delete_confirmation(
     await message.answer(
         f"Точно удалить анкету #{character_id} · {name} (VK {owner_vk_id})? "
         f"Отменить это действие будет нельзя.{warning}",
-        keyboard=confirm_menu("admin_character_delete", character_id),
+        keyboard=confirm_menu(
+            "admin_character_delete",
+            character_id,
+            cancel_cmd="admin_characters",
+        ),
     )
 
 
@@ -339,4 +352,7 @@ async def apply_adjustment(message: Message, **_: object) -> None:
             return
 
     await clear_state(message.peer_id)
-    await message.answer(f"У персонажа {name} установлено: {result}.", keyboard=back_to_admin())
+    await message.answer(
+        f"У персонажа {name} установлено: {result}.",
+        keyboard=back_to_admin_characters(),
+    )

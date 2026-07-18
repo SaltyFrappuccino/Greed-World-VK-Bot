@@ -14,7 +14,7 @@ STAT_FIELDS: dict[str, str] = {
     "scent": "нюх",
 }
 
-#: Обратный индекс для разбора админского ввода («?!стат чуйка 5»).
+#: Обратный индекс для разбора админского ввода («?стат чуйка 5»).
 STAT_ALIASES: dict[str, str] = {title: field for field, title in STAT_FIELDS.items()}
 
 STAT_MIN = 1
@@ -85,10 +85,17 @@ async def require_owned(
 
 
 async def find_character(session: AsyncSession, query: str) -> Character:
-    """Найти персонажа по имени: сначала точное совпадение, потом подстрока."""
+    """Найти персонажа по ID или имени: сначала точное совпадение, потом подстрока."""
     query = query.strip()
     if not query:
-        raise ValidationError("Укажите имя персонажа.")
+        raise ValidationError("Укажите ID или имя персонажа.")
+
+    id_text = query.removeprefix("#")
+    if id_text.isdigit():
+        by_id = await characters_crud.get_by_id(session, int(id_text))
+        if by_id is None:
+            raise NotFoundError(f"Анкета с ID #{id_text} не найдена.")
+        return by_id
 
     exact = await characters_crud.get_by_name(session, query)
     if exact is not None:

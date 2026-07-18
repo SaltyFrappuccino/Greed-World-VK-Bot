@@ -47,10 +47,11 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    aitunnel_api_key: str | None = None
-    aitunnel_base_url: str = "https://api.aitunnel.ru/v1/"
-    aitunnel_model: str = "gemini-3.1-flash-lite"
-    aitunnel_max_tokens: int = 4000
+    dslab_api_key: str | None = None
+    dslab_base_url: str = "https://api.dslab.tech/v1"
+    dslab_model: str = "deepseek-v4-flash"
+    dslab_vision_model: str = "gemini-2.5-flash-lite"
+    dslab_max_tokens: int = 4000
 
     @field_validator("admin_vk_ids", mode="before")
     @classmethod

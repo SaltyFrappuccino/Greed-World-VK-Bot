@@ -8,7 +8,7 @@ labeler = BotLabeler(auto_rules=[PeerRule(from_chat=True)])
 labeler.vbml_ignore_case = True
 
 
-@labeler.message(text=["?!кубик", "?!кубик <args>", "?!куб", "?!куб <args>"])
+@labeler.message(text=["?кубик", "?кубик <args>", "?куб", "?куб <args>"])
 async def dice_command(message: Message, args: str = "", **_: object) -> None:
     try:
         low, high = dice_service.parse_bounds(args)

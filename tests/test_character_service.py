@@ -95,3 +95,11 @@ async def test_admin_can_delete_character_by_id(session):
 
     assert name == "Удаляемый"
     assert await characters_crud.get_by_id(session, character.id) is None
+
+
+@pytest.mark.asyncio
+async def test_find_character_by_database_id(session):
+    character = await characters_crud.create(session, vk_id=1, name="Ава")
+
+    assert await character_service.find_character(session, str(character.id)) is character
+    assert await character_service.find_character(session, f"#{character.id}") is character

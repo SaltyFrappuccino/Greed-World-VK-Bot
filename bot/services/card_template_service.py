@@ -6,6 +6,20 @@ from bot.utils.templates import parse_labeled_template
 from bot.utils.validators import parse_optional_limit, parse_optional_slot_number, parse_rarity
 
 
+CONTOUR_SUBTYPES: tuple[str, ...] = (
+    "Форма — Покров",
+    "Форма — Оружие",
+    "Форма — Снаряд",
+    "Форма — Область",
+    "Форма — Ловушка",
+    "Форма — Барьер",
+    "Эффект — Существо",
+    "Эффект — Метка",
+    "Эффект — Превращение",
+    "Эффект — Связь",
+)
+
+
 @dataclass(frozen=True)
 class CardDraft:
     name: str

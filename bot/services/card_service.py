@@ -93,6 +93,11 @@ async def delete_card(session: AsyncSession, card_id: int) -> str:
     card = await cards_crud.get_by_id(session, card_id)
     if card is None:
         raise NotFoundError("Карта не найдена.")
+    bound_copies = await cards_crud.count_bound_ownerships(session, card_id)
+    if bound_copies:
+        raise ValidationError(
+            f"Нельзя удалить карту: {bound_copies} её копий связаны с Контурами."
+        )
     name = card.name
     await cards_crud.delete(session, card)
     return name
@@ -140,9 +145,6 @@ async def grant_card(session: AsyncSession, card_id: int, character_id: int) -> 
     if character is None:
         raise NotFoundError("Персонаж не найден.")
 
-    if await cards_crud.get_ownership(session, card_id, character_id) is not None:
-        raise ValidationError(f"У персонажа {character.name} уже есть карта «{card.name}».")
-
     live_copies = await cards_crud.count_owners(session, card_id)
     if card.transform_limit is not None and live_copies >= card.transform_limit:
         raise TransformLimitReached(
@@ -158,9 +160,17 @@ async def grant_card(session: AsyncSession, card_id: int, character_id: int) -> 
 
 async def revoke_card(session: AsyncSession, card_id: int, character_id: int) -> None:
     """Забрать копию карты - освобождает одно преобразование."""
-    ownership = await cards_crud.get_ownership(session, card_id, character_id)
+    ownership = await cards_crud.get_free_ownership(
+        session, card_id, character_id
+    )
     if ownership is None:
-        raise NotFoundError("У этого персонажа такой карты нет.")
+        existing = await cards_crud.get_ownership(session, card_id, character_id)
+        if existing is None:
+            raise NotFoundError("У этого персонажа такой карты нет.")
+        raise ValidationError(
+            "Все копии этой карты связаны с Контурами. Сначала измените или "
+            "разберите Контур."
+        )
 
     await cards_crud.remove_ownership(session, ownership)
 

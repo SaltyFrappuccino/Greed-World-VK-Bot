@@ -25,3 +25,15 @@ def test_relative_sqlite_path_is_resolved_from_project_root():
     path = settings.async_database_url.removeprefix("sqlite+aiosqlite:///")
     assert Path(path).is_absolute()
     assert Path(path).name == "zhadny_mir.db"
+
+
+def test_dslab_defaults_use_requested_openai_compatible_endpoint():
+    settings = Settings(
+        _env_file=None,
+        vk_community_token="test",
+        vk_group_id=1,
+    )
+
+    assert settings.dslab_base_url == "https://api.dslab.tech/v1"
+    assert settings.dslab_model == "deepseek-v4-flash"
+    assert settings.dslab_vision_model == "gemini-2.5-flash-lite"

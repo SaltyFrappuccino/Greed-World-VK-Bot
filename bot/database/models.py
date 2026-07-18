@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -79,6 +80,9 @@ class Card(Base):
 
 class Character(Base):
     __tablename__ = "characters"
+    __table_args__ = (
+        CheckConstraint("contour_limit >= 2", name="ck_character_contour_limit"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     vk_id: Mapped[int] = mapped_column(BigInteger, index=True)
@@ -102,6 +106,9 @@ class Character(Base):
         Enum(Rarity, native_enum=False), default=Rarity.H
     )
     shakei_balance: Mapped[int] = mapped_column(Integer, default=0)
+    contour_limit: Mapped[int] = mapped_column(
+        Integer, default=2, server_default="2"
+    )
 
     is_approved: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -120,6 +127,10 @@ class Contour(Base):
     __tablename__ = "contours"
     __table_args__ = (
         UniqueConstraint("character_id", "slot", name="uq_character_contour_slot"),
+        CheckConstraint(
+            "card_capacity >= 2 AND card_capacity <= 5",
+            name="ck_contour_card_capacity",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -127,6 +138,9 @@ class Contour(Base):
         ForeignKey("characters.id", ondelete="CASCADE"), index=True
     )
     slot: Mapped[int] = mapped_column(Integer)
+    card_capacity: Mapped[int] = mapped_column(
+        Integer, default=2, server_default="2"
+    )
     name: Mapped[str] = mapped_column(String(128))
     composition: Mapped[str] = mapped_column(Text, default="")
     appearance: Mapped[str] = mapped_column(Text, default="")
@@ -142,6 +156,11 @@ class Contour(Base):
     )
 
     character: Mapped[Character] = relationship(back_populates="contours")
+    components: Mapped[list[ContourComponent]] = relationship(
+        back_populates="contour",
+        cascade="all, delete-orphan",
+        order_by="ContourComponent.position",
+    )
 
 
 class CardOwnership(Base):
@@ -152,8 +171,6 @@ class CardOwnership(Base):
     """
 
     __tablename__ = "card_ownerships"
-    __table_args__ = (UniqueConstraint("card_id", "character_id", name="uq_card_character"),)
-
     id: Mapped[int] = mapped_column(primary_key=True)
     card_id: Mapped[int] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), index=True)
     character_id: Mapped[int] = mapped_column(
@@ -165,6 +182,37 @@ class CardOwnership(Base):
 
     card: Mapped[Card] = relationship(back_populates="ownerships")
     character: Mapped[Character] = relationship(back_populates="ownerships")
+    contour_component: Mapped[ContourComponent | None] = relationship(
+        back_populates="ownership", uselist=False
+    )
+
+
+class ContourComponent(Base):
+    """Одна конкретная копия карты, связанная с Контуром."""
+
+    __tablename__ = "contour_components"
+    __table_args__ = (
+        UniqueConstraint("contour_id", "position", name="uq_contour_component_position"),
+        UniqueConstraint("card_ownership_id", name="uq_contour_component_ownership"),
+        CheckConstraint(
+            "position >= 1 AND position <= 5",
+            name="ck_contour_component_position",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contour_id: Mapped[int] = mapped_column(
+        ForeignKey("contours.id", ondelete="CASCADE"), index=True
+    )
+    card_ownership_id: Mapped[int] = mapped_column(
+        ForeignKey("card_ownerships.id", ondelete="RESTRICT"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+
+    contour: Mapped[Contour] = relationship(back_populates="components")
+    ownership: Mapped[CardOwnership] = relationship(
+        back_populates="contour_component"
+    )
 
 
 class ShakeiTransaction(Base):
