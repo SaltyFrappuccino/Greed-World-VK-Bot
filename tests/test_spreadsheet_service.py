@@ -3,11 +3,22 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from bot.database.models import Card, CardOwnership, CardType, Rarity
+from bot.database.models import (
+    Card,
+    CardOwnership,
+    CardType,
+    Character,
+    Contour,
+    ContourComponent,
+    Rarity,
+)
 from bot.services.spreadsheet_service import (
     _build_sync,
     _character_sheet,
+    _contours_sheet,
+    _profile_sheet,
     _registry_sheet,
+    _safe_filename_part,
 )
 
 
@@ -50,6 +61,67 @@ def test_registry_export_uses_correct_game_number_and_vk_link():
 
     assert sheet["rows"][0][0:3] == [0, 41, "Искра"]
     assert sheet["rows"][0][-1] == "https://vk.ru/id564059694"
+
+
+def test_full_profile_export_contains_all_sections_and_contour_components():
+    character = Character(
+        id=7,
+        vk_id=564059694,
+        name="Ава",
+        age=28,
+        gender="Женский",
+        appearance="Описание внешности",
+        personality="Описание характера",
+        biography="Биография",
+        skills="Навык",
+        additional="Дополнение",
+        stress_resistance=2,
+        speech=3,
+        intuition=4,
+        spine=5,
+        will=4,
+        scent=3,
+        overall_rating=Rarity.H,
+        shakei_balance=100,
+        contour_limit=3,
+        is_approved=True,
+        created_at=datetime(2026, 7, 18, 12, 30),
+    )
+    ownership = CardOwnership(
+        ordinary_name="Верёвка",
+        ordinary_kind="Инструмент",
+        ordinary_rarity=Rarity.H,
+    )
+    contour = Contour(
+        id=4,
+        character_id=7,
+        slot=1,
+        card_capacity=2,
+        name="Узел",
+        created_by=564059694,
+        created_at=datetime(2026, 7, 18, 13, 0),
+    )
+    contour.components = [ContourComponent(position=1, ownership=ownership)]
+
+    profile = _profile_sheet(character)
+    contours = _contours_sheet(character, [contour])
+
+    assert ["Основное", "Владелец VK", "https://vk.ru/id564059694"] in profile["rows"]
+    assert ["Статы", "Чуйка", 4] in profile["rows"]
+    assert ["Дополнительно", "Дополнительно", "Дополнение"] in profile["rows"]
+    assert contours["rows"][0][0:5] == [4, 1, "Узел", "1/2", "1. Верёвка"]
+
+    export = _build_sync("character.xlsx", [profile, contours])
+    workbook = load_workbook(BytesIO(export.data))
+    profile_sheet = workbook["Анкета"]
+    assert profile_sheet["C4"].value == 7
+    assert profile_sheet["C4"].number_format == "General"
+    assert profile_sheet["C23"].value == datetime(2026, 7, 18, 12, 30)
+    assert profile_sheet["C23"].number_format == "dd.mm.yyyy hh:mm"
+
+
+def test_character_filename_part_keeps_name_and_removes_forbidden_characters():
+    assert _safe_filename_part("  Ава / Искра?  ") == "Ава___Искра"
 
 
 def test_xlsx_is_built_with_openpyxl_tables_dates_and_freeze_panes():

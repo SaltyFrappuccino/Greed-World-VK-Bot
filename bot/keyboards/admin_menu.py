@@ -16,11 +16,71 @@ def admin_menu() -> str:
     )
     keyboard.row()
     keyboard.add(
+        Text("AI-Ассистент", payload={"cmd": "admin_ai_assistant"}),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    keyboard.row()
+    keyboard.add(
         Text("Создать бэкап БД", payload={"cmd": "admin_database_backup"}),
         color=KeyboardButtonColor.SECONDARY,
     )
     keyboard.row()
     keyboard.add(Text("В меню", payload={"cmd": "menu"}), color=KeyboardButtonColor.SECONDARY)
+    return keyboard.get_json()
+
+
+def admin_ai_assistant_menu(session_id: int) -> str:
+    keyboard = Keyboard(one_time=False, inline=False)
+    keyboard.add(
+        Text("Новая задача", payload={"cmd": "admin_ai_assistant_new", "session_id": session_id}),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    keyboard.add(
+        Text("Текущий план", payload={"cmd": "admin_ai_assistant_plan", "session_id": session_id}),
+        color=KeyboardButtonColor.PRIMARY,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text("История", payload={"cmd": "admin_ai_assistant_history", "session_id": session_id}),
+        color=KeyboardButtonColor.SECONDARY,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text("Выйти из AI-режима", payload={"cmd": "admin_ai_assistant_exit", "session_id": session_id}),
+        color=KeyboardButtonColor.NEGATIVE,
+    )
+    return keyboard.get_json()
+
+
+def admin_ai_plan_menu(plan_id: int) -> str:
+    keyboard = Keyboard(one_time=False, inline=False)
+    keyboard.add(
+        Text("Подтвердить", payload={"cmd": "admin_ai_plan_confirm", "plan_id": plan_id}),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text("Изменить просьбу", payload={"cmd": "admin_ai_plan_revise", "plan_id": plan_id}),
+        color=KeyboardButtonColor.PRIMARY,
+    )
+    keyboard.add(
+        Text("Отменить", payload={"cmd": "admin_ai_plan_cancel", "plan_id": plan_id}),
+        color=KeyboardButtonColor.NEGATIVE,
+    )
+    return keyboard.get_json()
+
+
+def admin_ai_destructive_menu(plan_id: int) -> str:
+    keyboard = Keyboard(one_time=False, inline=False)
+    keyboard.add(
+        Text("Да, выполнить с удалением", payload={"cmd": "admin_ai_plan_destructive_confirm", "plan_id": plan_id}),
+        color=KeyboardButtonColor.NEGATIVE,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text("Отменить план", payload={"cmd": "admin_ai_plan_cancel", "plan_id": plan_id}),
+        color=KeyboardButtonColor.SECONDARY,
+    )
     return keyboard.get_json()
 
 
@@ -239,7 +299,11 @@ def back_to_admin_cards() -> str:
 
 
 def confirm_menu(
-    action: str, target_id: int, *, cancel_cmd: str = "admin"
+    action: str,
+    target_id: int,
+    *,
+    cancel_cmd: str = "admin",
+    cancel_payload: dict[str, object] | None = None,
 ) -> str:
     keyboard = Keyboard(one_time=False, inline=False)
     keyboard.add(
@@ -248,7 +312,7 @@ def confirm_menu(
     )
     keyboard.row()
     keyboard.add(
-        Text("Отмена", payload={"cmd": cancel_cmd}),
+        Text("Отмена", payload=cancel_payload or {"cmd": cancel_cmd}),
         color=KeyboardButtonColor.SECONDARY,
     )
     return keyboard.get_json()
@@ -617,6 +681,13 @@ def admin_character_cards_menu(character_id: int) -> str:
         Text(
             "Экспорт карт XLSX",
             payload={"cmd": "character_cards_export", "id": character_id},
+        ),
+        color=KeyboardButtonColor.PRIMARY,
+    )
+    keyboard.add(
+        Text(
+            "Экспорт анкеты XLSX",
+            payload={"cmd": "character_profile_export", "id": character_id},
         ),
         color=KeyboardButtonColor.PRIMARY,
     )

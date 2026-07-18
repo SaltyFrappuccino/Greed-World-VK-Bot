@@ -1,5 +1,6 @@
 from bot.handlers.dm.admin import (
     ai,
+    assistant,
     cards,
     characters,
     commands,
@@ -14,6 +15,7 @@ from bot.middlewares.auth import AdminRule
 def test_all_card_and_character_mutations_are_behind_admin_rule():
     for admin_labeler in (
         ai.labeler,
+        assistant.labeler,
         cards.labeler,
         characters.labeler,
         commands.labeler,

@@ -1,7 +1,24 @@
 from vkbottle import BaseStateGroup, BuiltinStateDispenser
 
+RETURN_CONTEXT_KEY = "__return_context__"
+
+
+class NavigationStateDispenser(BuiltinStateDispenser):
+    """Сохраняет экран, к которому должна вернуть отмена текущего сценария."""
+
+    async def set(self, peer_id: int, state: str, **payload: object) -> None:
+        if RETURN_CONTEXT_KEY not in payload:
+            current = await self.get(peer_id)
+            current_payload = current.payload if current is not None else {}
+            context = current_payload.get(RETURN_CONTEXT_KEY)
+            if not isinstance(context, dict):
+                context = default_return_context(state, payload)
+            payload[RETURN_CONTEXT_KEY] = context
+        await super().set(peer_id, state, **payload)
+
+
 #: Общий диспенсер: создаётся здесь, чтобы и хендлеры, и Bot работали с одним состоянием.
-state_dispenser = BuiltinStateDispenser()
+state_dispenser = NavigationStateDispenser()
 
 
 class CardsState(BaseStateGroup):
@@ -68,6 +85,13 @@ class AdminAIState(BaseStateGroup):
     CONTOUR_CONFIRM = "contour_confirm"
 
 
+class AdminAssistantState(BaseStateGroup):
+    CHAT = "admin_assistant_chat"
+    PLAN_CONFIRM = "admin_assistant_plan_confirm"
+    DESTRUCTIVE_CONFIRM = "admin_assistant_destructive_confirm"
+    EXECUTING = "admin_assistant_executing"
+
+
 class AdminContourState(BaseStateGroup):
     CREATE_COMPONENTS = "create_components"
     CREATE_MODE = "create_mode"
@@ -86,3 +110,67 @@ async def clear_state(peer_id: int) -> None:
     """Сброс состояния. Встроенный delete() кидает KeyError на пустом peer_id."""
     if await state_dispenser.get(peer_id) is not None:
         await state_dispenser.delete(peer_id)
+
+
+def return_context(payload: dict[str, object] | None) -> dict[str, object]:
+    if payload is None:
+        return {"screen": "main"}
+    context = payload.get(RETURN_CONTEXT_KEY)
+    return context if isinstance(context, dict) else {"screen": "main"}
+
+
+def default_return_context(
+    state: str, payload: dict[str, object]
+) -> dict[str, object]:
+    state_name = str(state)
+    character_id = _positive_id(payload.get("character_id"))
+    card_id = _positive_id(payload.get("card_id"))
+    contour_id = _positive_id(payload.get("contour_id"))
+
+    if state_name.startswith("CardsState"):
+        return {"screen": "cards"}
+    if state_name.startswith("TransferState"):
+        return {"screen": "main"}
+    if state_name.startswith("AdminShakeiState") and character_id:
+        return {"screen": "character_shakei", "id": character_id}
+    if state_name.startswith("AdminCardState"):
+        if state_name == AdminCardState.GRANT_CHARACTER and card_id:
+            return {"screen": "card_owners", "id": card_id}
+        if character_id:
+            return {"screen": "character_cards", "id": character_id}
+        if card_id:
+            return {"screen": "card", "id": card_id}
+        return {"screen": "admin_cards"}
+    if state_name.startswith("AdminCharacterState"):
+        if character_id:
+            return {"screen": "character", "id": character_id}
+        return {"screen": "admin_characters"}
+    if state_name.startswith("AdminStatsState"):
+        return {"screen": "admin_characters"}
+    if state_name.startswith("AdminContourState"):
+        if state_name == AdminContourState.LIMIT_VALUE and character_id:
+            return {"screen": "character", "id": character_id}
+        if state_name.startswith(f"{AdminContourState.__name__}:create") and character_id:
+            return {"screen": "character_contours", "id": character_id}
+        if contour_id:
+            return {"screen": "contour", "id": contour_id}
+        if character_id:
+            return {"screen": "character_contours", "id": character_id}
+        return {"screen": "admin_characters"}
+    if state_name.startswith("AdminAIState"):
+        if contour_id:
+            return {"screen": "contour", "id": contour_id}
+        if character_id:
+            return {"screen": "character_contours", "id": character_id}
+        return {"screen": "admin_characters"}
+    if state_name.startswith("Admin"):
+        return {"screen": "admin"}
+    return {"screen": "main"}
+
+
+def _positive_id(value: object) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None

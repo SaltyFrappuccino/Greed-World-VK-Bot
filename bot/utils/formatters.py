@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 
 from bot.database.models import (
@@ -9,6 +10,22 @@ from bot.database.models import (
     ShakeiTransaction,
 )
 from bot.services.character_service import STAT_FIELDS
+
+
+def vk_plain_text(text: str) -> str:
+    """Преобразует типичную Markdown-разметку модели в читаемый текст VK."""
+    result = text.replace("\r\n", "\n").replace("\r", "\n")
+    result = re.sub(r"(?m)^\s*```[^\n]*\n?", "", result)
+    result = re.sub(r"\[([^\]]+)]\((https?://[^)]+)\)", r"\1 — \2", result)
+    result = re.sub(r"(?m)^\s{0,3}#{1,6}\s+", "", result)
+    result = re.sub(r"(?m)^\s*[-+*]\s+", "• ", result)
+    result = re.sub(r"(?m)^\s*>\s?", "› ", result)
+    result = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", result)
+    result = re.sub(r"__([^_\n]+)__", r"\1", result)
+    result = re.sub(r"~~([^~\n]+)~~", r"\1", result)
+    result = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", result)
+    result = result.replace("```", "").replace("`", "")
+    return result.strip()
 
 
 def format_limit(card: Card, live_copies: int | None = None) -> str:

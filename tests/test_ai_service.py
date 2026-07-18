@@ -44,6 +44,42 @@ class _FakeClient:
 
 
 @pytest.mark.asyncio
+async def test_admin_assistant_uses_json_mode_without_native_tools(monkeypatch):
+    content = json.dumps(
+        {
+            "kind": "read_tools",
+            "message": "Найду анкету.",
+            "tools": [{"name": "find_character", "arguments": {"query": "Ава"}}],
+            "actions": [],
+            "warnings": [],
+        },
+        ensure_ascii=False,
+    )
+    completions = _FakeCompletions(content)
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setattr(
+        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    turn = await ai_service.generate_admin_assistant_turn(
+        [{"role": "user", "content": "Покажи Аву"}]
+    )
+
+    assert turn.kind == "read_tools"
+    assert turn.tools[0].name == "find_character"
+    assert "tools" not in completions.request
+    assert completions.request["response_format"] == {"type": "json_object"}
+    system_prompt = completions.request["messages"][0]["content"]
+    assert "H, G, F, E, D, C, B, A, S, SS" in system_prompt
+    assert "«эпическая», «легендарная»" in system_prompt
+    assert "Какому персонажу выдать карту?" in system_prompt
+    assert "не спрашивай, реестровая ли это карта" in system_prompt
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
 async def test_character_generation_uses_strict_json_schema(monkeypatch):
     content = json.dumps(
         {

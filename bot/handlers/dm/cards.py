@@ -13,7 +13,12 @@ from bot.keyboards.main_menu import (
 )
 from bot.services import card_service
 from bot.services.errors import ServiceError
-from bot.states import CardsState, clear_state, state_dispenser
+from bot.states import (
+    RETURN_CONTEXT_KEY,
+    CardsState,
+    clear_state,
+    state_dispenser,
+)
 from bot.utils import formatters
 from bot.utils.pagination import PAGE_SIZE, normalize_page
 
@@ -81,10 +86,23 @@ async def show_registry_card(
 
 @labeler.message(payload={"cmd": "card_search"})
 async def ask_query(message: Message, **_: object) -> None:
+    payload = message.get_payload_json() or {}
+    card_type = _type_from_payload(payload)
+    page = _page_from_payload(payload)
     async with get_session() as session:
         total = await cards_crud.count_cards(session)
 
-    await state_dispenser.set(message.peer_id, CardsState.SEARCH)
+    await state_dispenser.set(
+        message.peer_id,
+        CardsState.SEARCH,
+        **{
+            RETURN_CONTEXT_KEY: {
+                "screen": "cards_page",
+                "type": card_type.name,
+                "page": page,
+            }
+        },
+    )
     await message.answer(
         f"В реестре карт: {total}.\n"
         "Пришлите название карты. Можно ввести игровой номер, если он не "

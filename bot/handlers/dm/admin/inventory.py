@@ -179,10 +179,6 @@ async def ask_ordinary_revoke(message: Message, **_: object) -> None:
         "Введите точное название Обычной карты. Будет забрана одна свободная копия.",
         keyboard=cancel(),
     )
-    await message.answer(
-        "Введите ID карты. Будет забрана одна свободная копия.",
-        keyboard=cancel(),
-    )
 
 
 @labeler.message(state=AdminCardState.GRANT_CHARACTER)

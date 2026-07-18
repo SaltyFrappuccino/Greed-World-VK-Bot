@@ -1,4 +1,5 @@
 import asyncio
+import re
 from io import BytesIO
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
-from bot.database.models import Card, CardOwnership, CardType
+from bot.database.crud import contours as contours_crud
+from bot.database.models import Card, CardOwnership, CardType, Character, Contour
 from bot.services.errors import NotFoundError, ServiceError
 
 
@@ -28,16 +30,31 @@ async def export_character_cards(
     if character is None:
         raise NotFoundError("Анкета не найдена.")
     ownerships = await cards_crud.list_character_ownerships(session, character_id)
+    sheets = _character_card_sheets(character.name, ownerships)
+    filename = (
+        f"cards_{_safe_filename_part(character.name)}_{character.id}_"
+        f"{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
+    )
+    return await _build(filename, sheets)
+
+
+async def export_character_profile(
+    session: AsyncSession, character_id: int
+) -> SpreadsheetExport:
+    character = await characters_crud.get_by_id(session, character_id)
+    if character is None:
+        raise NotFoundError("Анкета не найдена.")
+    ownerships = await cards_crud.list_character_ownerships(session, character_id)
+    contours = await contours_crud.list_for_character(session, character_id)
     sheets = [
-        _character_sheet(character.name, ownerships, card_type, title)
-        for card_type, title in (
-            (CardType.SPECIAL, "Особые слоты"),
-            (CardType.SPELL, "Заклинания"),
-            (CardType.CONTOUR, "Контурные"),
-            (CardType.ORDINARY, "Обычные"),
-        )
+        _profile_sheet(character),
+        _contours_sheet(character, contours),
+        *_character_card_sheets(character.name, ownerships),
     ]
-    filename = f"cards_character_{character.id}_{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
+    filename = (
+        f"character_{_safe_filename_part(character.name)}_{character.id}_"
+        f"{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
+    )
     return await _build(filename, sheets)
 
 
@@ -57,6 +74,110 @@ async def export_registry(session: AsyncSession) -> SpreadsheetExport:
     ]
     filename = f"cards_registry_{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
     return await _build(filename, sheets)
+
+
+def _character_card_sheets(
+    character_name: str, ownerships: list[CardOwnership]
+) -> list[dict[str, object]]:
+    return [
+        _character_sheet(character_name, ownerships, card_type, title)
+        for card_type, title in (
+            (CardType.SPECIAL, "Особые слоты"),
+            (CardType.SPELL, "Заклинания"),
+            (CardType.CONTOUR, "Контурные"),
+            (CardType.ORDINARY, "Обычные"),
+        )
+    ]
+
+
+def _profile_sheet(character: Character) -> dict[str, object]:
+    rows = [
+        ["Основное", "ID анкеты в БД", character.id],
+        ["Основное", "Владелец VK", f"https://vk.ru/id{character.vk_id}"],
+        ["Основное", "Имя персонажа", character.name],
+        ["Основное", "Возраст", character.age if character.age is not None else ""],
+        ["Основное", "Пол", character.gender],
+        ["Основное", "Внешность", character.appearance],
+        ["Основное", "Характер", character.personality],
+        ["Основное", "Биография", character.biography],
+        ["Статы", "Стрессоустойчивость", character.stress_resistance],
+        ["Статы", "Речевой аппарат", character.speech],
+        ["Статы", "Чуйка", character.intuition],
+        ["Статы", "Хребет", character.spine],
+        ["Статы", "Воля", character.will],
+        ["Статы", "Нюх", character.scent],
+        ["Навыки", "Навыки", character.skills],
+        ["Прогресс", "Общий рейтинг", character.overall_rating.value],
+        ["Прогресс", "Шакеи", character.shakei_balance],
+        ["Прогресс", "Лимит Контуров", character.contour_limit],
+        ["Служебное", "Статус", "Подтверждена" if character.is_approved else "Не подтверждена"],
+        ["Служебное", "Дата создания", _excel_datetime(character.created_at)],
+        ["Дополнительно", "Дополнительно", character.additional],
+    ]
+    return {
+        "name": "Анкета",
+        "title": f"Полная анкета персонажа «{character.name}»",
+        "subtitle": "Основные сведения, статы и прогресс персонажа",
+        "headers": ["Раздел", "Поле", "Значение"],
+        "rows": rows,
+        "dateColumns": [2],
+        "widths": [18, 25, 80],
+    }
+
+
+def _contours_sheet(
+    character: Character, contours: list[Contour]
+) -> dict[str, object]:
+    rows = []
+    for contour in contours:
+        if contour.components:
+            composition = "\n".join(
+                f"{component.position}. {component.ownership.display_name}"
+                for component in contour.components
+            )
+        else:
+            composition = contour.composition or "Требуется ручная привязка карт"
+        rows.append(
+            [
+                contour.id,
+                contour.slot,
+                contour.name,
+                f"{len(contour.components)}/{contour.card_capacity}",
+                composition,
+                contour.appearance,
+                contour.primary_effect,
+                contour.additional_capabilities,
+                contour.activation_conditions,
+                contour.duration,
+                contour.conductivity,
+                contour.overload_impact,
+                _excel_datetime(contour.created_at),
+            ]
+        )
+    return {
+        "name": "Контуры",
+        "title": f"Контуры персонажа «{character.name}»",
+        "subtitle": f"Занято {len(contours)} из {character.contour_limit} доступных слотов",
+        "headers": [
+            "ID БД",
+            "Слот",
+            "Название",
+            "Карт / размер",
+            "Состав",
+            "Внешний вид",
+            "Основной эффект",
+            "Дополнительные возможности",
+            "Условия активации",
+            "Продолжительность",
+            "Проводимость",
+            "Влияние на Перегрузку",
+            "Дата создания",
+        ],
+        "rows": rows,
+        "emptyText": "Контуров у персонажа пока нет",
+        "dateColumns": [12],
+        "widths": [10, 8, 24, 14, 32, 36, 42, 42, 36, 24, 24, 36, 20],
+    }
 
 
 def _character_sheet(
@@ -185,6 +306,7 @@ def _add_sheet(workbook: Workbook, definition: dict[str, object], index: int) ->
     headers = list(definition["headers"])
     rows = list(definition["rows"])
     widths = list(definition["widths"])
+    display_widths = [min(float(width), 45) for width in widths]
     date_columns = set(definition["dateColumns"])
     last_column = get_column_letter(len(headers))
 
@@ -218,13 +340,13 @@ def _add_sheet(workbook: Workbook, definition: dict[str, object], index: int) ->
                 cell = sheet.cell(row=row_index, column=column_index, value=value)
                 cell.font = Font(name="Aptos", size=10)
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
-                if column_index - 1 in date_columns and value:
+                if column_index - 1 in date_columns and isinstance(value, datetime):
                     cell.number_format = "dd.mm.yyyy hh:mm"
                 if isinstance(value, str) and value.startswith("https://vk.ru/"):
                     cell.hyperlink = value
                     cell.style = "Hyperlink"
             sheet.row_dimensions[row_index].height = _content_row_height(
-                values, widths
+                values, display_widths
             )
         table = Table(
             displayName=f"CardsTable{index}",
@@ -240,15 +362,15 @@ def _add_sheet(workbook: Workbook, definition: dict[str, object], index: int) ->
         sheet.add_table(table)
     else:
         sheet.merge_cells(f"A4:{last_column}4")
-        sheet["A4"] = "Карт в этой категории пока нет"
+        sheet["A4"] = str(
+            definition.get("emptyText", "Карт в этой категории пока нет")
+        )
         sheet["A4"].fill = PatternFill("solid", fgColor="FAF6F9")
         sheet["A4"].font = Font(name="Aptos", italic=True, color="6B5A65")
         sheet["A4"].alignment = Alignment(vertical="center")
 
-    for column, width in enumerate(widths, start=1):
-        sheet.column_dimensions[get_column_letter(column)].width = min(
-            float(width), 45
-        )
+    for column, width in enumerate(display_widths, start=1):
+        sheet.column_dimensions[get_column_letter(column)].width = width
     sheet.freeze_panes = "A4"
     sheet.sheet_view.showGridLines = False
     if not rows:
@@ -267,6 +389,12 @@ def _excel_datetime(value: datetime | None) -> datetime | str:
     return value.replace(tzinfo=None)
 
 
+def _safe_filename_part(value: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value.strip())
+    cleaned = re.sub(r"\s+", "_", cleaned).strip("._")
+    return cleaned[:64] or "character"
+
+
 def _content_row_height(values: list[object], widths: list[object]) -> float:
     line_count = 1
     for value, width in zip(values, widths, strict=False):
@@ -279,4 +407,4 @@ def _content_row_height(values: list[object], widths: list[object]) -> float:
             for part in text.splitlines() or [""]
         )
         line_count = max(line_count, wrapped_lines)
-    return min(max(18, line_count * 15), 120)
+    return min(max(18, line_count * 15), 300)

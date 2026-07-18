@@ -1,10 +1,11 @@
 from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
-from bot.keyboards.admin_menu import admin_cards_menu, admin_characters_menu
 from bot.keyboards.main_menu import main_menu
 from bot.middlewares.auth import NotAdminRule
-from bot.states import clear_state, state_dispenser
+from bot.services.errors import ServiceError
+from bot.services.navigation_service import render_return
+from bot.states import clear_state, return_context, state_dispenser
 
 # Все хендлеры этого модуля живут только в личных сообщениях сообщества.
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
@@ -26,20 +27,17 @@ async def show_menu(message: Message, is_admin: bool = False, **_: object) -> No
 @labeler.message(payload={"cmd": "cancel"})
 async def cancel(message: Message, is_admin: bool = False, **_: object) -> None:
     current_state = await state_dispenser.get(message.peer_id)
-    state_name = current_state.state if current_state is not None else ""
+    context = return_context(
+        dict(current_state.payload) if current_state is not None else None
+    )
     await clear_state(message.peer_id)
-    if is_admin and state_name.startswith("AdminCardState"):
+    try:
+        await render_return(message, context, is_admin=is_admin)
+    except ServiceError as error:
         await message.answer(
-            "Отменено. Возвращаю в раздел «Карты».",
-            keyboard=admin_cards_menu(),
+            f"Сценарий отменён, но прежний экран недоступен: {error}",
+            keyboard=main_menu(is_admin),
         )
-    elif is_admin and state_name.startswith("Admin"):
-        await message.answer(
-            "Отменено. Возвращаю в раздел «Анкеты».",
-            keyboard=admin_characters_menu(),
-        )
-    else:
-        await message.answer("Отменено.", keyboard=main_menu(is_admin))
 
 
 @labeler.message(NotAdminRule(), payload={"cmd": "admin"})

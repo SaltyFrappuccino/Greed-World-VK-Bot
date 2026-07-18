@@ -4,6 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from bot.keyboards.admin_menu import (
+    admin_ai_assistant_menu,
+    admin_ai_destructive_menu,
+    admin_ai_plan_menu,
     admin_cards_menu,
     admin_character_cards_menu,
     admin_character_add_menu,
@@ -52,6 +55,9 @@ from bot.keyboards.main_menu import (
     "keyboard_json",
     [
         admin_menu(),
+        admin_ai_assistant_menu(1),
+        admin_ai_plan_menu(1),
+        admin_ai_destructive_menu(1),
         admin_characters_menu(),
         admin_character_add_menu(),
         admin_cards_menu(),
@@ -174,6 +180,14 @@ def test_quick_mutation_buttons_are_visible_only_to_admin():
     } <= admin_character
     assert "admin_character_edit_select" not in player_own_profile
     assert "admin_character_delete_select" not in player_own_profile
+    assert "character_profile_export" in player_own_profile
+    assert "character_profile_export" not in player_character
+    assert "character_profile_export" in _commands(
+        character_registry_detail_menu(
+            1, 0, is_admin=False, can_view_contours=True
+        )
+    )
+    assert "character_profile_export" in admin_character
     assert {
         "admin_character_edit_select",
         "admin_character_delete_select",

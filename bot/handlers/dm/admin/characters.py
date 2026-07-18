@@ -302,7 +302,11 @@ async def _show_character_delete_confirmation(
         keyboard=confirm_menu(
             "admin_character_delete",
             character_id,
-            cancel_cmd="admin_characters",
+            cancel_payload={
+                "cmd": "character_registry_view",
+                "id": character_id,
+                "page": 0,
+            },
         ),
     )
 

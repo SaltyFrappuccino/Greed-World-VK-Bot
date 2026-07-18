@@ -126,6 +126,51 @@ async def export_character_cards(
     )
 
 
+@labeler.message(payload_contains={"cmd": "character_profile_export"})
+async def export_character_profile(
+    message: Message, is_admin: bool = False, **_: object
+) -> None:
+    payload = message.get_payload_json() or {}
+    try:
+        character_id = parse_positive_int(
+            str(payload.get("id", "")), field="ID анкеты"
+        )
+        async with get_session() as session:
+            character = await characters_crud.get_by_id(session, character_id)
+            if character is None:
+                raise PermissionDenied("Анкета не найдена.")
+            if character.vk_id != message.from_id and not is_admin:
+                raise PermissionDenied(
+                    "Экспорт доступен только владельцу анкеты и администратору."
+                )
+            export = await spreadsheet_service.export_character_profile(
+                session, character_id
+            )
+        uploader = DocMessagesUploader(
+            message.ctx_api, attachment_name=export.filename
+        )
+        attachment = await uploader.upload(
+            export.data,
+            peer_id=message.peer_id,
+            title=export.filename,
+        )
+    except ServiceError as error:
+        await message.answer(str(error), keyboard=back_to_menu())
+        return
+    except Exception:
+        logger.exception("Не удалось экспортировать анкету персонажа")
+        await message.answer(
+            "Не удалось создать или отправить XLSX. Проверьте права сообщества на документы.",
+            keyboard=back_to_menu(),
+        )
+        return
+    await message.answer(
+        f"Полный экспорт анкеты «{character.name}» готов.",
+        attachment=attachment,
+        keyboard=profile_menu(character.id, is_admin=is_admin),
+    )
+
+
 async def _owned_from_payload(session: AsyncSession, message: Message) -> Character:
     payload = message.get_payload_json() or {}
     character_id = parse_positive_int(str(payload.get("id", "")), field="ID анкеты")

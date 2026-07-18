@@ -18,7 +18,7 @@ from bot.keyboards.admin_menu import (
     skip_card_field_menu,
     special_card_limit_menu,
 )
-from bot.keyboards.main_menu import cancel
+from bot.keyboards.main_menu import cancel, card_registry_detail_menu
 from bot.middlewares.auth import AdminRule
 from bot.services import ai_service, card_service
 from bot.services.card_template_service import (
@@ -737,7 +737,12 @@ async def do_edit(message: Message, **_: object) -> None:
             return
 
     await clear_state(message.peer_id)
-    await message.answer(f"Обновлено.\n\n{text}", keyboard=back_to_admin_cards())
+    await message.answer(
+        f"Обновлено.\n\n{text}",
+        keyboard=card_registry_detail_menu(
+            card.id, 0, card_type=card.card_type, is_admin=True
+        ),
+    )
 
 
 @labeler.message(payload={"cmd": "admin_card_delete"})
@@ -777,7 +782,14 @@ async def pick_delete_target(message: Message, **_: object) -> None:
     await message.answer(
         f"Удалить карту «{name}»?{warning}",
         keyboard=confirm_menu(
-            "admin_card_delete", card_id, cancel_cmd="admin_cards"
+            "admin_card_delete",
+            card_id,
+            cancel_payload={
+                "cmd": "card_registry_view",
+                "id": card_id,
+                "page": 0,
+                "type": card.card_type.name,
+            },
         ),
     )
 
@@ -831,7 +843,14 @@ async def _show_delete_confirmation(message: Message, card_id: int) -> None:
     await message.answer(
         f"Точно удалить карту «{name}»? Отменить это действие будет нельзя.{warning}",
         keyboard=confirm_menu(
-            "admin_card_delete", card_id, cancel_cmd="admin_cards"
+            "admin_card_delete",
+            card_id,
+            cancel_payload={
+                "cmd": "card_registry_view",
+                "id": card_id,
+                "page": 0,
+                "type": card.card_type.name,
+            },
         ),
     )
 

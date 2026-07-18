@@ -113,6 +113,13 @@ def profile_menu(character_id: int, *, is_admin: bool = False) -> str:
         ),
         color=KeyboardButtonColor.POSITIVE,
     )
+    keyboard.add(
+        Text(
+            "Экспорт анкеты XLSX",
+            payload={"cmd": "character_profile_export", "id": character_id},
+        ),
+        color=KeyboardButtonColor.POSITIVE,
+    )
     keyboard.row()
     keyboard.add(Text("В меню", payload={"cmd": "menu"}), color=KeyboardButtonColor.SECONDARY)
     return keyboard.get_json()
@@ -166,7 +173,16 @@ def card_registry_menu(
         keyboard, "cards_page", page, pages, extra={"type": card_type.name}
     )
     keyboard.row()
-    keyboard.add(Text("Поиск карты", payload={"cmd": "card_search"}))
+    keyboard.add(
+        Text(
+            "Поиск карты",
+            payload={
+                "cmd": "card_search",
+                "page": page,
+                "type": card_type.name,
+            },
+        )
+    )
     keyboard.add(
         Text(
             "К категориям карт",
@@ -371,6 +387,13 @@ def character_registry_detail_menu(
             ),
             color=KeyboardButtonColor.POSITIVE,
         )
+        keyboard.add(
+            Text(
+                "Экспорт анкеты XLSX",
+                payload={"cmd": "character_profile_export", "id": character_id},
+            ),
+            color=KeyboardButtonColor.POSITIVE,
+        )
         keyboard.row()
     elif can_view_contours:
         keyboard.add(
@@ -385,6 +408,13 @@ def character_registry_detail_menu(
             Text(
                 "Экспорт карт XLSX",
                 payload={"cmd": "character_cards_export", "id": character_id},
+            ),
+            color=KeyboardButtonColor.POSITIVE,
+        )
+        keyboard.add(
+            Text(
+                "Экспорт анкеты XLSX",
+                payload={"cmd": "character_profile_export", "id": character_id},
             ),
             color=KeyboardButtonColor.POSITIVE,
         )

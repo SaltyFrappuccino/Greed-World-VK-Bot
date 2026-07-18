@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -293,3 +294,68 @@ class ShakeiTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class AdminAISession(Base):
+    __tablename__ = "admin_ai_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    admin_vk_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    peer_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    messages: Mapped[list[AdminAIMessage]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    plans: Mapped[list[AdminAIPlan]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class AdminAIMessage(Base):
+    __tablename__ = "admin_ai_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("admin_ai_sessions.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text, default="")
+    details: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    session: Mapped[AdminAISession] = relationship(back_populates="messages")
+
+
+class AdminAIPlan(Base):
+    __tablename__ = "admin_ai_plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("admin_ai_sessions.id", ondelete="CASCADE"), index=True
+    )
+    admin_vk_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    status: Mapped[str] = mapped_column(String(48), default="proposed", index=True)
+    summary: Mapped[str] = mapped_column(Text)
+    actions: Mapped[list[dict[str, object]]] = mapped_column(JSON, default=list)
+    snapshot: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    destructive: Mapped[bool] = mapped_column(default=False)
+    result: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    session: Mapped[AdminAISession] = relationship(back_populates="plans")
