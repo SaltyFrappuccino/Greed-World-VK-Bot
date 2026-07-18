@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Character
@@ -16,6 +16,29 @@ async def get_by_id_for_update(session: AsyncSession, character_id: int) -> Char
 async def list_by_vk_id(session: AsyncSession, vk_id: int) -> list[Character]:
     stmt = select(Character).where(Character.vk_id == vk_id).order_by(Character.name)
     return list(await session.scalars(stmt))
+
+
+async def list_characters(
+    session: AsyncSession,
+    *,
+    offset: int = 0,
+    limit: int = 10,
+    approved_only: bool = True,
+) -> list[Character]:
+    stmt = select(Character)
+    if approved_only:
+        stmt = stmt.where(Character.is_approved.is_(True))
+    stmt = stmt.order_by(Character.name, Character.id).offset(offset).limit(limit)
+    return list(await session.scalars(stmt))
+
+
+async def count_characters(
+    session: AsyncSession, *, approved_only: bool = True
+) -> int:
+    stmt = select(func.count()).select_from(Character)
+    if approved_only:
+        stmt = stmt.where(Character.is_approved.is_(True))
+    return await session.scalar(stmt) or 0
 
 
 async def get_owned(

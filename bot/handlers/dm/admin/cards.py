@@ -94,6 +94,16 @@ async def start_edit(message: Message, **_: object) -> None:
     await message.answer("Какую карту правим? Название или номер слота.", keyboard=cancel())
 
 
+@labeler.message(payload_contains={"cmd": "admin_card_edit_select"})
+async def select_edit_target(message: Message, **_: object) -> None:
+    try:
+        card_id = _payload_id(message)
+    except ServiceError as error:
+        await message.answer(str(error), keyboard=back_to_admin())
+        return
+    await _open_card_editor(message, card_id)
+
+
 @labeler.message(state=AdminCardState.EDIT_PICK)
 async def pick_edit_target(message: Message, **_: object) -> None:
     async with get_session() as session:
@@ -150,6 +160,16 @@ async def do_edit(message: Message, **_: object) -> None:
 async def start_delete(message: Message, **_: object) -> None:
     await state_dispenser.set(message.peer_id, AdminCardState.DELETE_PICK)
     await message.answer("Какую карту удаляем? Название или номер слота.", keyboard=cancel())
+
+
+@labeler.message(payload_contains={"cmd": "admin_card_delete_select"})
+async def select_delete_target(message: Message, **_: object) -> None:
+    try:
+        card_id = _payload_id(message)
+    except ServiceError as error:
+        await message.answer(str(error), keyboard=back_to_admin())
+        return
+    await _show_delete_confirmation(message, card_id)
 
 
 @labeler.message(state=AdminCardState.DELETE_PICK)
@@ -231,3 +251,50 @@ async def revoke_card(message: Message, card_name: str, character_name: str, **_
         f"Карта «{names[0]}» забрана у персонажа {names[1]} - преобразование освободилось.",
         keyboard=back_to_admin(),
     )
+
+
+async def _open_card_editor(message: Message, card_id: int) -> None:
+    async with get_session() as session:
+        card = await cards_crud.get_by_id(session, card_id)
+        if card is None:
+            await message.answer("Карта не найдена.", keyboard=back_to_admin())
+            return
+        live_copies = await cards_crud.count_owners(session, card.id)
+        text = formatters.card_full(card, live_copies)
+
+    await state_dispenser.set(
+        message.peer_id, AdminCardState.EDIT_VALUE, card_id=card_id
+    )
+    await message.answer(f"{text}\n\n{EDIT_HINT}", keyboard=cancel())
+
+
+async def _show_delete_confirmation(message: Message, card_id: int) -> None:
+    async with get_session() as session:
+        card = await cards_crud.get_by_id(session, card_id)
+        if card is None:
+            await message.answer("Карта не найдена.", keyboard=back_to_admin())
+            return
+        live_copies = await cards_crud.count_owners(session, card.id)
+        name = card.name
+
+    await clear_state(message.peer_id)
+    warning = (
+        f"\n\n⚠️ Карта на руках у {live_copies} персонажей — владения тоже удалятся."
+        if live_copies
+        else ""
+    )
+    await message.answer(
+        f"Точно удалить карту «{name}»? Отменить это действие будет нельзя.{warning}",
+        keyboard=confirm_menu("admin_card_delete", card_id),
+    )
+
+
+def _payload_id(message: Message) -> int:
+    value = (message.get_payload_json() or {}).get("id")
+    try:
+        card_id = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError("Некорректный ID карты.") from None
+    if card_id <= 0:
+        raise ValidationError("Некорректный ID карты.")
+    return card_id

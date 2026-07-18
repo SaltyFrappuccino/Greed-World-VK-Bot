@@ -42,6 +42,29 @@ async def list_by_vk_id(session: AsyncSession, vk_id: int) -> list[Character]:
     return await characters_crud.list_by_vk_id(session, vk_id)
 
 
+async def list_registry(
+    session: AsyncSession,
+    *,
+    offset: int,
+    limit: int,
+    include_unapproved: bool = False,
+) -> list[Character]:
+    return await characters_crud.list_characters(
+        session,
+        offset=offset,
+        limit=limit,
+        approved_only=not include_unapproved,
+    )
+
+
+async def count_registry(
+    session: AsyncSession, *, include_unapproved: bool = False
+) -> int:
+    return await characters_crud.count_characters(
+        session, approved_only=not include_unapproved
+    )
+
+
 async def require_single_by_vk_id(session: AsyncSession, vk_id: int) -> Character:
     characters = await list_by_vk_id(session, vk_id)
     if not characters:
@@ -87,6 +110,35 @@ async def create_character(session: AsyncSession, *, vk_id: int, name: str, **fi
         raise ValidationError(f"Персонаж с именем «{name.strip()}» уже есть.")
 
     return await characters_crud.create(session, vk_id=vk_id, name=name, **fields)
+
+
+async def rename_character(
+    session: AsyncSession, character: Character, name: str
+) -> Character:
+    name = name.strip()
+    if not name:
+        raise ValidationError("Имя персонажа не может быть пустым.")
+    existing = await characters_crud.get_by_name(session, name)
+    if existing is not None and existing.id != character.id:
+        raise ValidationError(f"Персонаж с именем «{name}» уже есть.")
+    return await characters_crud.update(session, character, name=name)
+
+
+async def change_owner(
+    session: AsyncSession, character: Character, vk_id: int
+) -> Character:
+    if vk_id <= 0:
+        raise ValidationError("VK ID владельца должен быть больше нуля.")
+    return await characters_crud.update(session, character, vk_id=vk_id)
+
+
+async def delete_character(session: AsyncSession, character_id: int) -> str:
+    character = await characters_crud.get_by_id_for_update(session, character_id)
+    if character is None:
+        raise NotFoundError("Анкета не найдена.")
+    name = character.name
+    await characters_crud.delete(session, character)
+    return name
 
 
 async def update_profile(session: AsyncSession, character: Character, **fields: object) -> Character:

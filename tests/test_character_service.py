@@ -54,3 +54,44 @@ async def test_character_search_is_case_insensitive_for_cyrillic(session):
     character = await character_service.find_character(session, "тИхИй сТрАнНиК")
 
     assert character.name == "Тихий Странник"
+
+
+@pytest.mark.asyncio
+async def test_character_registry_hides_pending_from_players_but_not_admins(session):
+    approved = await character_service.create_character(
+        session, vk_id=1, name="Подтверждённый", is_approved=True
+    )
+    pending = await character_service.create_character(
+        session, vk_id=2, name="Черновик", is_approved=False
+    )
+
+    public = await character_service.list_registry(session, offset=0, limit=8)
+    admin = await character_service.list_registry(
+        session, offset=0, limit=8, include_unapproved=True
+    )
+
+    assert public == [approved]
+    assert set(admin) == {approved, pending}
+    assert await character_service.count_registry(session) == 1
+    assert await character_service.count_registry(session, include_unapproved=True) == 2
+
+
+@pytest.mark.asyncio
+async def test_admin_can_rename_character_and_change_owner_by_character_id(session):
+    character = await character_service.create_character(session, vk_id=10, name="Старое имя")
+
+    await character_service.rename_character(session, character, "Новое имя")
+    await character_service.change_owner(session, character, 20)
+
+    assert character.name == "Новое имя"
+    assert character.vk_id == 20
+
+
+@pytest.mark.asyncio
+async def test_admin_can_delete_character_by_id(session):
+    character = await character_service.create_character(session, vk_id=10, name="Удаляемый")
+
+    name = await character_service.delete_character(session, character.id)
+
+    assert name == "Удаляемый"
+    assert await characters_crud.get_by_id(session, character.id) is None

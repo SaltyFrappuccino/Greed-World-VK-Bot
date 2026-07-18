@@ -4,10 +4,6 @@ from vkbottle import BaseStateGroup, BuiltinStateDispenser
 state_dispenser = BuiltinStateDispenser()
 
 
-class ProfileState(BaseStateGroup):
-    EDIT_VALUE = "edit_value"
-
-
 class CardsState(BaseStateGroup):
     SEARCH = "search"
 
@@ -37,6 +33,8 @@ class AdminStatsState(BaseStateGroup):
 class AdminCharacterState(BaseStateGroup):
     OWNER = "owner"
     TEMPLATE = "template"
+    EDIT_PICK = "edit_pick"
+    EDIT_VALUE = "edit_value"
 
 
 class AdminAIState(BaseStateGroup):

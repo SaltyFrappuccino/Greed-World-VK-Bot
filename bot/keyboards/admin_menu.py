@@ -17,9 +17,17 @@ def admin_menu() -> str:
         Text("Добавить анкету", payload={"cmd": "admin_character_add"}),
         color=KeyboardButtonColor.POSITIVE,
     )
+    keyboard.add(Text("Редактировать анкету", payload={"cmd": "admin_character_edit"}))
+    keyboard.row()
+    keyboard.add(Text("Реестр анкет", payload={"cmd": "character_registry"}))
     keyboard.row()
     keyboard.add(Text("AI → Анкета", payload={"cmd": "admin_ai_character"}))
     keyboard.add(Text("AI → Контур", payload={"cmd": "admin_ai_contour"}))
+    keyboard.row()
+    keyboard.add(
+        Text("Создать бэкап БД", payload={"cmd": "admin_database_backup"}),
+        color=KeyboardButtonColor.PRIMARY,
+    )
     keyboard.row()
     keyboard.add(Text("В меню", payload={"cmd": "menu"}), color=KeyboardButtonColor.SECONDARY)
     return keyboard.get_json()
@@ -88,4 +96,44 @@ def ai_collect_menu(action: str) -> str:
     )
     keyboard.row()
     keyboard.add(Text("Отмена", payload={"cmd": "cancel"}), color=KeyboardButtonColor.NEGATIVE)
+    return keyboard.get_json()
+
+
+def admin_character_edit_menu(character_id: int) -> str:
+    keyboard = Keyboard(one_time=False, inline=False)
+    fields = (
+        ("name", "Имя"),
+        ("age", "Возраст"),
+        ("gender", "Пол"),
+        ("appearance", "Внешность"),
+        ("personality", "Характер"),
+        ("biography", "Биография"),
+        ("skills", "Навыки"),
+        ("additional", "Дополнительно"),
+        ("stress_resistance", "Стрессоустойчивость"),
+        ("speech", "Речевой аппарат"),
+        ("intuition", "Чуйка"),
+        ("spine", "Хребет"),
+        ("will", "Воля"),
+        ("scent", "Нюх"),
+        ("overall_rating", "Рейтинг"),
+        ("vk_id", "Владелец VK"),
+    )
+    for index, (field, title) in enumerate(fields):
+        if index and index % 2 == 0:
+            keyboard.row()
+        keyboard.add(
+            Text(
+                title,
+                payload={"cmd": "admin_character_edit_field", "id": character_id, "field": field},
+            )
+        )
+    keyboard.row()
+    keyboard.add(
+        Text(
+            "К анкете",
+            payload={"cmd": "character_registry_view", "id": character_id, "page": 0},
+        ),
+        color=KeyboardButtonColor.SECONDARY,
+    )
     return keyboard.get_json()
