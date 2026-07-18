@@ -45,6 +45,7 @@ _TEMPLATES: dict[CardType, str] = {
 Команда активации:
 Расходование:""",
     CardType.ORDINARY: """Название:
+Вид содержимого:
 Редкость:
 Описание:
 Способ использования:""",
@@ -77,6 +78,7 @@ _LABELS: dict[CardType, dict[str, str]] = {
     },
     CardType.ORDINARY: {
         "Название": "name",
+        "Вид содержимого": "kind",
         "Редкость": "rarity",
         "Описание": "description",
         "Способ использования": "usage",
@@ -119,6 +121,10 @@ def parse_card_template(card_type: CardType, text: str) -> CardDraft:
             raise ValidationError(
                 "Укажите подтип контура, например «Форма — Покров» или «Эффект — Связь»."
             )
+    elif card_type is CardType.ORDINARY:
+        kind = values.get("kind", "").strip()
+        if not kind:
+            raise ValidationError("Укажите вид содержимого Обычной карты.")
 
     description = _optional(values.get("description", ""))
     usage = _optional(values.get("usage", ""))

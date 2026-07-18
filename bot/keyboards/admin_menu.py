@@ -138,6 +138,11 @@ def card_add_mode_menu() -> str:
         color=KeyboardButtonColor.SECONDARY,
     )
     keyboard.row()
+    keyboard.add(
+        Text("Оформить через AI", payload={"cmd": "admin_card_add_ai"}),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    keyboard.row()
     keyboard.add(Text("Отмена", payload={"cmd": "cancel"}), color=KeyboardButtonColor.NEGATIVE)
     return keyboard.get_json()
 
@@ -319,11 +324,14 @@ def contour_create_components_menu(
     pages: int,
 ) -> str:
     keyboard = Keyboard(one_time=False, inline=False)
-    for card_id, name, free_count in cards:
+    for ownership_id, name, free_count in cards:
         keyboard.add(
             Text(
                 _short_label(f"{name} · свободно {free_count}"),
-                payload={"cmd": "admin_contour_component_select", "card_id": card_id},
+                payload={
+                    "cmd": "admin_contour_component_select",
+                    "ownership_id": ownership_id,
+                },
             ),
             color=KeyboardButtonColor.PRIMARY,
         )
@@ -460,7 +468,7 @@ def contour_current_component_menu(contour: Contour, action: str) -> str:
     for component in contour.components:
         keyboard.add(
             Text(
-                _short_label(component.ownership.card.name),
+                _short_label(component.ownership.display_name),
                 payload={"cmd": action, "component_id": component.id},
             ),
             color=(
@@ -562,17 +570,55 @@ def admin_character_cards_menu(character_id: int) -> str:
     keyboard = Keyboard(one_time=False, inline=False)
     keyboard.add(
         Text(
-            "Выдать карту",
-            payload={"cmd": "admin_character_card_grant", "id": character_id},
+            "Выдать Особую",
+            payload={"cmd": "admin_character_special_grant", "id": character_id},
         ),
         color=KeyboardButtonColor.POSITIVE,
     )
     keyboard.add(
         Text(
-            "Забрать карту",
-            payload={"cmd": "admin_character_card_revoke", "id": character_id},
+            "Забрать Особую",
+            payload={"cmd": "admin_character_special_revoke", "id": character_id},
         ),
         color=KeyboardButtonColor.NEGATIVE,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text(
+            "Выдать Закл./Конт.",
+            payload={"cmd": "admin_character_registry_grant", "id": character_id},
+        ),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    keyboard.add(
+        Text(
+            "Забрать Закл./Конт.",
+            payload={"cmd": "admin_character_registry_revoke", "id": character_id},
+        ),
+        color=KeyboardButtonColor.NEGATIVE,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text(
+            "Добавить Обычную",
+            payload={"cmd": "admin_character_ordinary_add", "id": character_id},
+        ),
+        color=KeyboardButtonColor.POSITIVE,
+    )
+    keyboard.add(
+        Text(
+            "Забрать Обычную",
+            payload={"cmd": "admin_character_ordinary_revoke", "id": character_id},
+        ),
+        color=KeyboardButtonColor.NEGATIVE,
+    )
+    keyboard.row()
+    keyboard.add(
+        Text(
+            "Экспорт карт XLSX",
+            payload={"cmd": "character_cards_export", "id": character_id},
+        ),
+        color=KeyboardButtonColor.PRIMARY,
     )
     keyboard.row()
     keyboard.add(

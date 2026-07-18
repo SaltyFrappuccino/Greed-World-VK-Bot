@@ -1,8 +1,12 @@
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
+from vkbottle import DocMessagesUploader
 from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import characters as characters_crud
 from bot.database.engine import get_session
 from bot.database.models import Character
 from bot.keyboards.main_menu import (
@@ -10,8 +14,8 @@ from bot.keyboards.main_menu import (
     character_select_menu,
     profile_menu,
 )
-from bot.services import character_service
-from bot.services.errors import ServiceError
+from bot.services import character_service, spreadsheet_service
+from bot.services.errors import PermissionDenied, ServiceError
 from bot.states import clear_state
 from bot.utils import formatters
 from bot.utils.messages import answer_long
@@ -19,6 +23,7 @@ from bot.utils.validators import parse_positive_int
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
 labeler.vbml_ignore_case = True
+logger = logging.getLogger(__name__)
 
 @labeler.message(payload={"cmd": "profile"})
 async def show_profiles(
@@ -74,6 +79,51 @@ async def my_cards(message: Message, is_admin: bool = False, **_: object) -> Non
             f"Карты персонажа {character.name}:\n\n{text}",
             keyboard=profile_menu(character.id, is_admin=is_admin),
         )
+
+
+@labeler.message(payload_contains={"cmd": "character_cards_export"})
+async def export_character_cards(
+    message: Message, is_admin: bool = False, **_: object
+) -> None:
+    payload = message.get_payload_json() or {}
+    try:
+        character_id = parse_positive_int(
+            str(payload.get("id", "")), field="ID анкеты"
+        )
+        async with get_session() as session:
+            character = await characters_crud.get_by_id(session, character_id)
+            if character is None:
+                raise PermissionDenied("Анкета не найдена.")
+            if character.vk_id != message.from_id and not is_admin:
+                raise PermissionDenied(
+                    "Экспорт доступен только владельцу анкеты и администратору."
+                )
+            export = await spreadsheet_service.export_character_cards(
+                session, character_id
+            )
+        uploader = DocMessagesUploader(
+            message.ctx_api, attachment_name=export.filename
+        )
+        attachment = await uploader.upload(
+            export.data,
+            peer_id=message.peer_id,
+            title=export.filename,
+        )
+    except ServiceError as error:
+        await message.answer(str(error), keyboard=back_to_menu())
+        return
+    except Exception:
+        logger.exception("Не удалось экспортировать карты персонажа")
+        await message.answer(
+            "Не удалось создать или отправить XLSX. Проверьте права сообщества на документы.",
+            keyboard=back_to_menu(),
+        )
+        return
+    await message.answer(
+        f"Экспорт карт персонажа «{character.name}» готов.",
+        attachment=attachment,
+        keyboard=profile_menu(character.id, is_admin=is_admin),
+    )
 
 
 async def _owned_from_payload(session: AsyncSession, message: Message) -> Character:

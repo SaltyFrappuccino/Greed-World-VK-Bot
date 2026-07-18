@@ -106,8 +106,8 @@ async def select_create_component(message: Message, **_: object) -> None:
     if state is None:
         return
     try:
-        card_id = _positive_payload(
-            message.get_payload_json() or {}, "card_id", "ID карты"
+        ownership_id = _positive_payload(
+            message.get_payload_json() or {}, "ownership_id", "ID копии карты"
         )
         selected = list(state.payload.get("selected_ownership_ids", []))
         if len(selected) >= int(state.payload.get("max_components", 2)):
@@ -115,15 +115,22 @@ async def select_create_component(message: Message, **_: object) -> None:
                 "В выбранный размер Контура больше карт не помещается."
             )
         async with get_session() as session:
-            ownership = await cards_crud.get_free_ownership(
-                session, card_id, state.payload["character_id"]
-            )
-            if ownership is None:
+            ownership = await cards_crud.get_ownership_by_id(session, ownership_id)
+            if (
+                ownership is None
+                or ownership.character_id != state.payload["character_id"]
+                or ownership.contour_component is not None
+            ):
                 raise ValidationError("Свободной копии этой карты больше нет.")
             selected_ownerships = [
                 await cards_crud.get_ownership_by_id(session, item) for item in selected
             ]
-            if any(item and item.card_id == card_id for item in selected_ownerships):
+            if any(
+                item
+                and item.display_type is ownership.display_type
+                and item.display_name.casefold() == ownership.display_name.casefold()
+                for item in selected_ownerships
+            ):
                 raise ValidationError("Две одинаковые карты в Контуре запрещены.")
             selected.append(ownership.id)
     except ServiceError as error:
@@ -150,7 +157,7 @@ async def finish_component_selection(message: Message, **_: object) -> None:
             ]
             if len(ownerships) < 2 or any(item is None for item in ownerships):
                 raise ValidationError("Выберите минимум две доступные карты.")
-            if not any(item.card.card_type is CardType.CONTOUR for item in ownerships):
+            if not any(item.display_type is CardType.CONTOUR for item in ownerships):
                 raise ValidationError(
                     "В составе должна быть хотя бы одна Контурная карта."
                 )
@@ -781,16 +788,18 @@ async def _show_create_component_picker(message: Message, requested_page: int) -
         ownerships = await cards_crud.list_character_ownerships(
             session, state.payload["character_id"]
         )
-        selected_card_ids = {
-            ownership.card_id for ownership in ownerships if ownership.id in selected_ids
+        selected_card_keys = {
+            (ownership.display_type, ownership.display_name.casefold())
+            for ownership in ownerships
+            if ownership.id in selected_ids
         }
-        grouped = _free_groups(ownerships, excluded_card_ids=selected_card_ids)
+        grouped = _free_groups(ownerships, excluded_card_keys=selected_card_keys)
         page, pages = normalize_page(
             requested_page, len(grouped), page_size=CARD_PAGE_SIZE
         )
         chunk = grouped[page * CARD_PAGE_SIZE : (page + 1) * CARD_PAGE_SIZE]
         selected_names = [
-            ownership.card.name for ownership in ownerships if ownership.id in selected_ids
+            ownership.display_name for ownership in ownerships if ownership.id in selected_ids
         ]
     maximum = int(state.payload.get("max_components", 2))
     text = (
@@ -807,7 +816,7 @@ async def _show_create_component_picker(message: Message, requested_page: int) -
     await message.answer(
         text,
         keyboard=contour_create_components_menu(
-            [(card_id, name, count) for card_id, _, name, count in chunk],
+            [(ownership_id, name, count) for _, ownership_id, name, count in chunk],
             selected_count=len(selected_ids),
             page=page,
             pages=pages,
@@ -861,8 +870,14 @@ async def _show_available_cards(
         ownerships = await cards_crud.list_character_ownerships(
             session, contour.character_id
         )
-        excluded = {component.ownership.card_id for component in contour.components}
-        grouped = _free_groups(ownerships, excluded_card_ids=excluded)
+        excluded = {
+            (
+                component.ownership.display_type,
+                component.ownership.display_name.casefold(),
+            )
+            for component in contour.components
+        }
+        grouped = _free_groups(ownerships, excluded_card_keys=excluded)
         page, pages = normalize_page(
             requested_page, len(grouped), page_size=CARD_PAGE_SIZE
         )
@@ -886,15 +901,18 @@ async def _show_available_cards(
 
 
 def _free_groups(
-    ownerships: list[CardOwnership], *, excluded_card_ids: set[int]
-) -> list[tuple[int, int, str, int]]:
-    grouped: dict[int, list[CardOwnership]] = defaultdict(list)
+    ownerships: list[CardOwnership],
+    *,
+    excluded_card_keys: set[tuple[CardType, str]],
+) -> list[tuple[tuple[CardType, str], int, str, int]]:
+    grouped: dict[tuple[CardType, str], list[CardOwnership]] = defaultdict(list)
     for ownership in ownerships:
-        if ownership.contour_component is None and ownership.card_id not in excluded_card_ids:
-            grouped[ownership.card_id].append(ownership)
+        key = (ownership.display_type, ownership.display_name.casefold())
+        if ownership.contour_component is None and key not in excluded_card_keys:
+            grouped[key].append(ownership)
     return [
-        (card_id, items[0].id, items[0].card.name, len(items))
-        for card_id, items in grouped.items()
+        (key, items[0].id, items[0].display_name, len(items))
+        for key, items in grouped.items()
     ]
 
 
@@ -1002,11 +1020,11 @@ def _character_context(character) -> str:
 
 def _card_context(ownerships: list[CardOwnership]) -> str:
     return "\n\n".join(
-        f"Карта #{ownership.card.id}: {ownership.card.name}\n"
-        f"Тип: {ownership.card.card_type.value}\n"
-        f"Подтип/вид: {ownership.card.kind}\n"
-        f"Описание: {ownership.card.description}\n"
-        f"Использование: {ownership.card.usage}"
+        f"Карта: {ownership.display_name}\n"
+        f"Тип: {ownership.display_type.value}\n"
+        f"Подтип/вид: {ownership.display_kind}\n"
+        f"Описание: {ownership.display_description}\n"
+        f"Использование: {ownership.display_usage}"
         for ownership in ownerships
     )
 

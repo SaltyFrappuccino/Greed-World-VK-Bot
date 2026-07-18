@@ -14,8 +14,6 @@ _ASYNC_DRIVERS = {
 }
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
 def resolve_database_url(database_url: str) -> str:
     """Привязать относительный SQLite-файл к корню проекта, а не к cwd."""
     scheme, separator, path_text = database_url.partition(":///")

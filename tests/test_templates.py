@@ -30,13 +30,14 @@ def test_template_parser_ignores_copied_instruction_before_fields():
 Скопируйте шаблон и заполните его:
 
 Название: Верёвка
+Вид содержимого: Инструмент
 Редкость: H
 Описание: Обычная верёвка
 Способ использования: Связать что-нибудь""",
     )
 
     assert draft.name == "Верёвка"
-    assert draft.kind == "Обычная"
+    assert draft.kind == "Инструмент"
 
 
 def test_spell_template_builds_usage_from_activation_and_consumption():

@@ -77,7 +77,7 @@ async def save_character(message: Message, **_: object) -> None:
 
     await clear_state(message.peer_id)
     await message.answer(
-        f"Анкета «{character.name}» добавлена владельцу VK {owner_vk_id}.",
+        f"Анкета «{character.name}» добавлена владельцу https://vk.ru/id{owner_vk_id}.",
         keyboard=back_to_admin_characters(),
     )
 
@@ -268,7 +268,7 @@ async def _show_character_editor(message: Message, character_id: int) -> None:
     await clear_state(message.peer_id)
     await message.answer(
         f"Редактирование анкеты #{character_id}\n"
-        f"Персонаж: {name}\nВладелец: VK {owner_vk_id}\n\n"
+            f"Персонаж: {name}\nВладелец: https://vk.ru/id{owner_vk_id}\n\n"
         "Выберите поле:",
         keyboard=admin_character_edit_menu(character_id),
     )
@@ -296,7 +296,8 @@ async def _show_character_delete_confirmation(
         else ""
     )
     await message.answer(
-        f"Точно удалить анкету #{character_id} · {name} (VK {owner_vk_id})? "
+        f"Точно удалить анкету #{character_id} · {name} "
+        f"(https://vk.ru/id{owner_vk_id})? "
         f"Отменить это действие будет нельзя.{warning}",
         keyboard=confirm_menu(
             "admin_character_delete",

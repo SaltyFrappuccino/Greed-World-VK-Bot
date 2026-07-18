@@ -20,7 +20,7 @@ def format_limit(card: Card, live_copies: int | None = None) -> str:
 
 def card_short(card: Card) -> str:
     """Краткая карточка для чата: ?карта."""
-    slot = f"№{card.number} " if card.number is not None else ""
+    slot = _card_game_number(card)
     lines = [
         f"🃏 {slot}{card.name} [{card.rarity.value}]",
         f"ID карты в БД: #{card.id}",
@@ -37,7 +37,7 @@ def card_short(card: Card) -> str:
 
 def card_full(card: Card, live_copies: int | None = None) -> str:
     """Полная карточка для ЛС и админки."""
-    slot = f"№{card.number} " if card.number is not None else ""
+    slot = _card_game_number(card)
     lines = [
         f"🃏 {slot}{card.name} [{card.rarity.value}]",
         f"Тип: {card.card_type.value}",
@@ -58,7 +58,7 @@ def card_list(cards: list[Card]) -> str:
     if not cards:
         return "Ничего не найдено."
     return "\n".join(
-        f"{'№' + str(card.number) + ' ' if card.number is not None else ''}"
+        f"{_card_game_number(card)}"
         f"{card.name} [{card.rarity.value}] - {card.kind}"
         for card in cards
     )
@@ -123,7 +123,7 @@ def format_contour(contour: Contour) -> str:
         lines.append(
             "Состав: "
             + " + ".join(
-                f"#{component.ownership.card.id} · {component.ownership.card.name}"
+                _ownership_label(component.ownership)
                 for component in components
             )
         )
@@ -151,18 +151,35 @@ def format_contour(contour: Contour) -> str:
 def character_card_holdings(ownerships: list[CardOwnership]) -> str:
     if not ownerships:
         return "Карт пока нет."
-    grouped: dict[int, list[CardOwnership]] = defaultdict(list)
+    grouped: dict[tuple[CardType, int | str], list[CardOwnership]] = defaultdict(list)
     for ownership in ownerships:
-        grouped[ownership.card_id].append(ownership)
-    lines = []
-    for items in grouped.values():
-        card = items[0].card
-        bound = sum(item.contour_component is not None for item in items)
-        lines.append(
-            f"#{card.id} · {card.name} [{card.rarity.value}] — "
-            f"всего {len(items)}, свободно {len(items) - bound}, связано {bound}"
+        key: int | str = (
+            ownership.card_id
+            if ownership.card_id is not None
+            else ownership.display_name.casefold()
         )
-    return "\n".join(lines)
+        grouped[(ownership.display_type, key)].append(ownership)
+    sections: list[str] = []
+    for card_type, title in (
+        (CardType.SPECIAL, "Карты Особых слотов"),
+        (CardType.SPELL, "Карты Заклинаний"),
+        (CardType.CONTOUR, "Контурные карты"),
+        (CardType.ORDINARY, "Обычные карты"),
+        (CardType.GM, "Карты ГеймМастеров"),
+    ):
+        lines: list[str] = []
+        for (group_type, _), items in grouped.items():
+            if group_type is not card_type:
+                continue
+            ownership = items[0]
+            bound = sum(item.contour_component is not None for item in items)
+            label = _ownership_label(ownership)
+            lines.append(
+                f"{label} [{ownership.display_rarity.value}] — всего {len(items)}, "
+                f"свободно {len(items) - bound}, связано {bound}"
+            )
+        sections.append(f"{title}:\n" + ("\n".join(lines) if lines else "—"))
+    return "\n\n".join(sections)
 
 
 def card_owner_holdings(ownerships: list[CardOwnership]) -> str:
@@ -198,3 +215,17 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+def _card_game_number(card: Card) -> str:
+    if card.card_type is CardType.SPECIAL and card.number is not None:
+        return f"Особый слот №{card.number} · "
+    if card.card_type in (CardType.SPELL, CardType.CONTOUR) and card.registry_number is not None:
+        return f"Реестр №{card.registry_number} · "
+    return ""
+
+
+def _ownership_label(ownership: CardOwnership) -> str:
+    if ownership.card is None:
+        return ownership.display_name
+    return f"{_card_game_number(ownership.card)}{ownership.card.name}"

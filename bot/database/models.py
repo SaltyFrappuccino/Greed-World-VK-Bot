@@ -51,10 +51,21 @@ class CardType(str, enum.Enum):
 
 class Card(Base):
     __tablename__ = "cards"
+    __table_args__ = (
+        CheckConstraint(
+            "(card_type = 'SPECIAL' AND number IS NOT NULL AND number >= 0 AND number <= 99 AND registry_number IS NULL) "
+            "OR (card_type IN ('SPELL', 'CONTOUR') AND number IS NULL AND registry_number IS NOT NULL AND registry_number >= 0) "
+            "OR (card_type = 'GM' AND number IS NULL AND registry_number IS NULL)",
+            name="ck_card_number_pool",
+        ),
+        UniqueConstraint("registry_number", name="uq_cards_registry_number"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Номер Особого слота. У обычных карт номера нет.
+    # Номер Особого слота в отдельном пуле 0–99.
     number: Mapped[int | None] = mapped_column(Integer, unique=True, default=None)
+    # Общий игровой номер Заклинаний и Контурных карт, начиная с 0.
+    registry_number: Mapped[int | None] = mapped_column(Integer, default=None)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     card_type: Mapped[CardType] = mapped_column(
         Enum(CardType, native_enum=False), default=CardType.ORDINARY,
@@ -172,19 +183,66 @@ class CardOwnership(Base):
 
     __tablename__ = "card_ownerships"
     id: Mapped[int] = mapped_column(primary_key=True)
-    card_id: Mapped[int] = mapped_column(ForeignKey("cards.id", ondelete="CASCADE"), index=True)
+    __table_args__ = (
+        CheckConstraint(
+            "(card_id IS NOT NULL AND ordinary_name IS NULL) OR "
+            "(card_id IS NULL AND ordinary_name IS NOT NULL)",
+            name="ck_ownership_registered_or_ordinary",
+        ),
+    )
+
+    card_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), index=True, nullable=True
+    )
     character_id: Mapped[int] = mapped_column(
         ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    ordinary_name: Mapped[str | None] = mapped_column(String(128), default=None)
+    ordinary_kind: Mapped[str | None] = mapped_column(String(64), default=None)
+    ordinary_description: Mapped[str | None] = mapped_column(Text, default=None)
+    ordinary_usage: Mapped[str | None] = mapped_column(Text, default=None)
+    ordinary_rarity: Mapped[Rarity | None] = mapped_column(
+        Enum(Rarity, native_enum=False), default=None
     )
     obtained_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    card: Mapped[Card] = relationship(back_populates="ownerships")
+    card: Mapped[Card | None] = relationship(back_populates="ownerships")
     character: Mapped[Character] = relationship(back_populates="ownerships")
     contour_component: Mapped[ContourComponent | None] = relationship(
         back_populates="ownership", uselist=False
     )
+
+    @property
+    def is_ordinary(self) -> bool:
+        return self.card_id is None
+
+    @property
+    def display_name(self) -> str:
+        return self.card.name if self.card is not None else (self.ordinary_name or "")
+
+    @property
+    def display_type(self) -> CardType:
+        return self.card.card_type if self.card is not None else CardType.ORDINARY
+
+    @property
+    def display_kind(self) -> str:
+        return self.card.kind if self.card is not None else (self.ordinary_kind or "Обычная")
+
+    @property
+    def display_description(self) -> str:
+        return self.card.description if self.card is not None else (self.ordinary_description or "")
+
+    @property
+    def display_usage(self) -> str:
+        return self.card.usage if self.card is not None else (self.ordinary_usage or "")
+
+    @property
+    def display_rarity(self) -> Rarity:
+        if self.card is not None:
+            return self.card.rarity
+        return self.ordinary_rarity or Rarity.H
 
 
 class ContourComponent(Base):

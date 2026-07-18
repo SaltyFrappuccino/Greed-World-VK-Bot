@@ -82,8 +82,8 @@ async def test_profile_and_card_formatters_show_database_ids(session):
     card = await card_service.create_card(
         session,
         name="Верёвка",
-        card_type=CardType.ORDINARY,
-        kind=CardType.ORDINARY.value,
+        card_type=CardType.SPELL,
+        kind=CardType.SPELL.value,
         rarity=Rarity.H,
         admin_vk_id=99,
     )

@@ -13,7 +13,7 @@ from bot.keyboards.admin_menu import (
     back_to_admin,
 )
 from bot.middlewares.auth import AdminRule
-from bot.services import backup_service, character_service
+from bot.services import backup_service, character_service, spreadsheet_service
 from bot.services.errors import ServiceError
 from bot.states import clear_state
 from bot.utils.validators import parse_positive_int
@@ -81,6 +81,37 @@ async def create_database_backup(message: Message, **_: object) -> None:
     )
 
 
+@labeler.message(payload={"cmd": "admin_cards_export"})
+async def export_cards_registry(message: Message, **_: object) -> None:
+    await message.answer("Собираю реестр карт в XLSX…")
+    try:
+        async with get_session() as session:
+            export = await spreadsheet_service.export_registry(session)
+        uploader = DocMessagesUploader(
+            message.ctx_api, attachment_name=export.filename
+        )
+        attachment = await uploader.upload(
+            export.data,
+            peer_id=message.peer_id,
+            title=export.filename,
+        )
+    except ServiceError as error:
+        await message.answer(str(error), keyboard=back_to_admin())
+        return
+    except Exception:
+        logger.exception("Не удалось экспортировать реестр карт")
+        await message.answer(
+            "Не удалось создать или отправить XLSX. Проверьте права сообщества на документы.",
+            keyboard=back_to_admin(),
+        )
+        return
+    await message.answer(
+        "Экспорт реестра карт готов.",
+        attachment=attachment,
+        keyboard=admin_cards_menu(),
+    )
+
+
 @labeler.message(payload={"cmd": "admin_pending"})
 async def pending_profiles(message: Message, **_: object) -> None:
     async with get_session() as session:
@@ -90,7 +121,10 @@ async def pending_profiles(message: Message, **_: object) -> None:
         await message.answer("Анкет на подтверждение нет.", keyboard=back_to_admin())
         return
 
-    lines = [f"{character.id}. {character.name} (vk {character.vk_id})" for character in pending]
+    lines = [
+        f"{character.id}. {character.name} (https://vk.ru/id{character.vk_id})"
+        for character in pending
+    ]
     await message.answer(
         "Ждут подтверждения:\n\n"
         + "\n".join(lines)

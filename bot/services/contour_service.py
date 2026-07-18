@@ -368,20 +368,23 @@ async def _validated_ownerships(
         bound = ownership.contour_component
         if bound is not None and bound.contour_id != allowed_contour_id:
             raise ValidationError(
-                f"Копия карты «{ownership.card.name}» уже связана с другим Контуром."
+                f"Копия карты «{ownership.display_name}» уже связана с другим Контуром."
             )
         ownerships.append(ownership)
 
-    card_ids = [ownership.card_id for ownership in ownerships]
-    if len(set(card_ids)) != len(card_ids):
+    card_keys = [
+        (ownership.display_type.value, ownership.display_name.casefold())
+        for ownership in ownerships
+    ]
+    if len(set(card_keys)) != len(card_keys):
         raise ValidationError("В один Контур нельзя вставить две одинаковые карты.")
-    if not any(ownership.card.card_type is CardType.CONTOUR for ownership in ownerships):
+    if not any(ownership.display_type is CardType.CONTOUR for ownership in ownerships):
         raise ValidationError("В составе должна быть хотя бы одна Контурная карта.")
     return ownerships
 
 
 def _composition(ownerships: list[CardOwnership]) -> str:
-    return " + ".join(ownership.card.name for ownership in ownerships)
+    return " + ".join(ownership.display_name for ownership in ownerships)
 
 
 def _validate_capacity(value: int) -> None:

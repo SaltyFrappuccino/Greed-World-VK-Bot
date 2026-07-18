@@ -16,8 +16,12 @@ class TransferState(BaseStateGroup):
 class AdminCardState(BaseStateGroup):
     TYPE = "type"
     ADD_MODE = "add_mode"
+    ORDINARY_CHARACTER = "ordinary_character"
     ADD_TEMPLATE = "add_template"
+    ADD_AI_SOURCE = "add_ai_source"
+    ADD_AI_CONFIRM = "add_ai_confirm"
     ADD_NAME = "add_name"
+    ADD_KIND = "add_kind"
     ADD_CONTOUR_SUBTYPE = "add_contour_subtype"
     ADD_RARITY = "add_rarity"
     ADD_NUMBER = "add_number"
@@ -32,6 +36,12 @@ class AdminCardState(BaseStateGroup):
     GRANT_CHARACTER = "grant_character"
     CHARACTER_GRANT_CARD = "character_grant_card"
     CHARACTER_REVOKE_CARD = "character_revoke_card"
+    CHARACTER_GRANT_SPECIAL = "character_grant_special"
+    CHARACTER_GRANT_REGISTRY = "character_grant_registry"
+    CHARACTER_REVOKE_SPECIAL = "character_revoke_special"
+    CHARACTER_REVOKE_REGISTRY = "character_revoke_registry"
+    CHARACTER_ADD_ORDINARY = "character_add_ordinary"
+    CHARACTER_REVOKE_ORDINARY = "character_revoke_ordinary"
 
 
 class AdminShakeiState(BaseStateGroup):

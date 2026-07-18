@@ -12,7 +12,16 @@ def allow_test_admin(monkeypatch):
     monkeypatch.setattr(auth_service, "require_admin", lambda _vk_id: None)
 
 
-async def _card_copy(session, character_id, name, card_type=CardType.ORDINARY):
+async def _card_copy(session, character_id, name, card_type=CardType.SPELL):
+    if card_type is CardType.ORDINARY:
+        ownership = await card_service.grant_ordinary_card(
+            session,
+            character_id=character_id,
+            name=name,
+            kind="Предмет",
+            rarity=Rarity.H,
+        )
+        return None, ownership
     card = await card_service.create_card(
         session,
         name=name,
@@ -90,7 +99,7 @@ async def test_contour_count_and_each_capacity_upgrade_independently(session):
 
     assert character.contour_limit == 3
     assert contour.card_capacity == 3
-    assert [item.ownership.card.name for item in contour.components] == [
+    assert [item.ownership.display_name for item in contour.components] == [
         "Покров",
         "Молния",
         "Скорость",
@@ -234,7 +243,7 @@ async def test_cards_can_be_replaced_and_removed_without_breaking_contour_rules(
     )
 
     lightning_component = next(
-        item for item in contour.components if item.ownership.card.name == "Молния"
+        item for item in contour.components if item.ownership.display_name == "Молния"
     )
     contour = await contour_service.replace_card(
         session,
@@ -243,18 +252,18 @@ async def test_cards_can_be_replaced_and_removed_without_breaking_contour_rules(
         admin_vk_id=99,
     )
     speed_component = next(
-        item for item in contour.components if item.ownership.card.name == "Скорость"
+        item for item in contour.components if item.ownership.display_name == "Скорость"
     )
     contour = await contour_service.remove_card(
         session, component_id=speed_component.id, admin_vk_id=99
     )
 
-    assert [item.ownership.card.name for item in contour.components] == [
+    assert [item.ownership.display_name for item in contour.components] == [
         "Покров",
         "Огонь",
     ]
     form_component = next(
-        item for item in contour.components if item.ownership.card.name == "Покров"
+        item for item in contour.components if item.ownership.display_name == "Покров"
     )
     with pytest.raises(ValidationError, match="минимум 2"):
         await contour_service.remove_card(

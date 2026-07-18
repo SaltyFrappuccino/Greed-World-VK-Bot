@@ -28,7 +28,38 @@ async def get_by_name(session: AsyncSession, name: str) -> Card | None:
 
 
 async def get_by_number(session: AsyncSession, number: int) -> Card | None:
-    return await session.scalar(select(Card).where(Card.number == number))
+    return await session.scalar(
+        select(Card).where(
+            Card.card_type == CardType.SPECIAL,
+            Card.number == number,
+        )
+    )
+
+
+async def get_by_registry_number(session: AsyncSession, number: int) -> Card | None:
+    return await session.scalar(
+        select(Card).where(
+            Card.card_type.in_((CardType.SPELL, CardType.CONTOUR)),
+            Card.registry_number == number,
+        )
+    )
+
+
+async def next_registry_number(session: AsyncSession) -> int:
+    numbers = list(
+        await session.scalars(
+            select(Card.registry_number)
+            .where(Card.registry_number.is_not(None))
+            .order_by(Card.registry_number)
+        )
+    )
+    expected = 0
+    for number in numbers:
+        if number == expected:
+            expected += 1
+        elif number is not None and number > expected:
+            break
+    return expected
 
 
 async def search_by_name(session: AsyncSession, query: str, limit: int = 10) -> list[Card]:
@@ -38,13 +69,26 @@ async def search_by_name(session: AsyncSession, query: str, limit: int = 10) -> 
     return [card for card in cards if expected in card.name.casefold()][:limit]
 
 
-async def list_cards(session: AsyncSession, offset: int = 0, limit: int = 10) -> list[Card]:
-    stmt = select(Card).order_by(Card.name).offset(offset).limit(limit)
+async def list_cards(
+    session: AsyncSession,
+    offset: int = 0,
+    limit: int = 10,
+    card_types: tuple[CardType, ...] | None = None,
+) -> list[Card]:
+    stmt = select(Card)
+    if card_types:
+        stmt = stmt.where(Card.card_type.in_(card_types))
+    stmt = stmt.order_by(Card.card_type, Card.number, Card.registry_number, Card.name).offset(offset).limit(limit)
     return list(await session.scalars(stmt))
 
 
-async def count_cards(session: AsyncSession) -> int:
-    return await session.scalar(select(func.count()).select_from(Card)) or 0
+async def count_cards(
+    session: AsyncSession, card_types: tuple[CardType, ...] | None = None
+) -> int:
+    stmt = select(func.count()).select_from(Card)
+    if card_types:
+        stmt = stmt.where(Card.card_type.in_(card_types))
+    return await session.scalar(stmt) or 0
 
 
 async def create(
@@ -56,6 +100,7 @@ async def create(
     rarity: Rarity,
     created_by: int,
     number: int | None = None,
+    registry_number: int | None = None,
     description: str = "",
     usage: str = "",
     transform_limit: int | None = None,
@@ -67,6 +112,7 @@ async def create(
         rarity=rarity,
         created_by=created_by,
         number=number,
+        registry_number=registry_number,
         description=description,
         usage=usage,
         transform_limit=transform_limit,
@@ -148,6 +194,58 @@ async def add_ownership(session: AsyncSession, card_id: int, character_id: int) 
     return ownership
 
 
+async def add_ordinary_ownership(
+    session: AsyncSession,
+    *,
+    character_id: int,
+    name: str,
+    kind: str,
+    rarity: Rarity,
+    description: str = "",
+    usage: str = "",
+) -> CardOwnership:
+    ownership = CardOwnership(
+        character_id=character_id,
+        card_id=None,
+        ordinary_name=name.strip(),
+        ordinary_kind=kind.strip(),
+        ordinary_rarity=rarity,
+        ordinary_description=description.strip(),
+        ordinary_usage=usage.strip(),
+    )
+    session.add(ownership)
+    await session.flush()
+    return ownership
+
+
+async def get_free_ordinary_ownership(
+    session: AsyncSession, character_id: int, name: str
+) -> CardOwnership | None:
+    expected = name.strip().casefold()
+    stmt = (
+        select(CardOwnership)
+        .outerjoin(
+            ContourComponent,
+            ContourComponent.card_ownership_id == CardOwnership.id,
+        )
+        .where(
+            CardOwnership.character_id == character_id,
+            CardOwnership.card_id.is_(None),
+            ContourComponent.id.is_(None),
+        )
+        .order_by(CardOwnership.id)
+    )
+    ownerships = list(await session.scalars(stmt))
+    return next(
+        (
+            ownership
+            for ownership in ownerships
+            if (ownership.ordinary_name or "").casefold() == expected
+        ),
+        None,
+    )
+
+
 async def remove_ownership(session: AsyncSession, ownership: CardOwnership) -> None:
     await session.delete(ownership)
     await session.flush()
@@ -169,14 +267,21 @@ async def list_character_ownerships(
     stmt = (
         select(CardOwnership)
         .where(CardOwnership.character_id == character_id)
-        .join(Card, Card.id == CardOwnership.card_id)
+        .outerjoin(Card, Card.id == CardOwnership.card_id)
         .options(
             selectinload(CardOwnership.card),
             selectinload(CardOwnership.contour_component).selectinload(
                 ContourComponent.contour
             ),
         )
-        .order_by(Card.name, CardOwnership.id)
+        .order_by(
+            Card.card_type,
+            Card.number,
+            Card.registry_number,
+            Card.name,
+            CardOwnership.ordinary_name,
+            CardOwnership.id,
+        )
     )
     return list(await session.scalars(stmt))
 

@@ -2,10 +2,14 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import characters as characters_crud
 from bot.database.engine import get_session
 from bot.database.models import CardType
 from bot.keyboards.admin_menu import (
     back_to_admin_cards,
+    admin_character_cards_menu,
+    ai_collect_menu,
+    ai_confirm_menu,
     card_add_mode_menu,
     card_rarity_menu,
     card_type_menu,
@@ -16,7 +20,7 @@ from bot.keyboards.admin_menu import (
 )
 from bot.keyboards.main_menu import cancel
 from bot.middlewares.auth import AdminRule
-from bot.services import card_service
+from bot.services import ai_service, card_service
 from bot.services.card_template_service import (
     CONTOUR_SUBTYPES,
     parse_card_template,
@@ -26,6 +30,7 @@ from bot.services.card_template_service import (
 from bot.services.errors import ServiceError, ValidationError
 from bot.states import AdminCardState, clear_state, state_dispenser
 from bot.utils import formatters
+from bot.utils.messages import answer_long
 from bot.utils.validators import (
     parse_optional_limit,
     parse_optional_slot_number,
@@ -71,11 +76,47 @@ async def choose_card_type(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=card_type_menu())
         return
 
+    if card_type is CardType.ORDINARY:
+        await state_dispenser.set(
+            message.peer_id,
+            AdminCardState.ORDINARY_CHARACTER,
+            card_type=card_type.name,
+        )
+        await message.answer(
+            "Обычная карта создаётся сразу у персонажа и не попадает в реестр. "
+            "Введите ID анкеты получателя.",
+            keyboard=cancel(),
+        )
+        return
+
     await state_dispenser.set(
         message.peer_id, AdminCardState.ADD_MODE, card_type=card_type.name
     )
     await message.answer(
         f"Тип: {card_type.value}. Как заполняем карту?",
+        keyboard=card_add_mode_menu(),
+    )
+
+
+@labeler.message(state=AdminCardState.ORDINARY_CHARACTER)
+async def choose_ordinary_character(message: Message, **_: object) -> None:
+    try:
+        character_id = parse_positive_int(message.text, field="ID анкеты")
+        async with get_session() as session:
+            character = await characters_crud.get_by_id(session, character_id)
+            if character is None:
+                raise ValidationError("Анкета не найдена.")
+    except ServiceError as error:
+        await message.answer(str(error), keyboard=cancel())
+        return
+    await state_dispenser.set(
+        message.peer_id,
+        AdminCardState.ADD_MODE,
+        card_type=CardType.ORDINARY.name,
+        character_id=character_id,
+    )
+    await message.answer(
+        f"Обычная карта для #{character.id} · {character.name}. Как заполняем?",
         keyboard=card_add_mode_menu(),
     )
 
@@ -99,6 +140,111 @@ async def choose_wizard_mode(message: Message, **_: object) -> None:
         return
     await state_dispenser.set(message.peer_id, AdminCardState.ADD_NAME, **payload)
     await message.answer("Пришлите название карты.", keyboard=cancel())
+
+
+@labeler.message(payload={"cmd": "admin_card_add_ai"})
+async def choose_ai_mode(message: Message, **_: object) -> None:
+    payload = await _wizard_payload(message, AdminCardState.ADD_MODE)
+    if payload is None:
+        return
+    await state_dispenser.set(
+        message.peer_id,
+        AdminCardState.ADD_AI_SOURCE,
+        **payload,
+        source_parts=[],
+    )
+    await message.answer(
+        "Опишите карту своими словами или пришлите заполненный текст в любом "
+        "формате. Можно отправить несколько сообщений. Когда закончите, нажмите "
+        "«Готово — обработать».",
+        keyboard=ai_collect_menu("admin_ai_card"),
+    )
+
+
+@labeler.message(payload={"cmd": "admin_ai_card_generate"})
+async def generate_ai_card(message: Message, **_: object) -> None:
+    payload = await _wizard_payload(message, AdminCardState.ADD_AI_SOURCE)
+    if payload is None:
+        return
+    source_parts = list(payload.get("source_parts", []))
+    if not source_parts:
+        await message.answer(
+            "Сначала пришлите описание карты.",
+            keyboard=ai_collect_menu("admin_ai_card"),
+        )
+        return
+    card_type = parse_card_type(str(payload["card_type"]))
+    await message.answer("Оформляю карту…", keyboard=cancel())
+    try:
+        draft = await ai_service.generate_card("\n\n".join(source_parts), card_type)
+    except ServiceError as error:
+        await message.answer(
+            str(error), keyboard=ai_collect_menu("admin_ai_card")
+        )
+        return
+    await state_dispenser.set(
+        message.peer_id,
+        AdminCardState.ADD_AI_CONFIRM,
+        card_type=card_type.name,
+        character_id=payload.get("character_id"),
+        draft=draft.model_dump(mode="json"),
+    )
+    await answer_long(
+        message,
+        ai_service.card_preview(draft, card_type),
+        keyboard=ai_confirm_menu("admin_ai_card"),
+    )
+
+
+@labeler.message(state=AdminCardState.ADD_AI_SOURCE)
+async def collect_ai_card_source(message: Message, **_: object) -> None:
+    text = message.text.strip()
+    if not text:
+        await message.answer(
+            "Пришлите текстовое описание карты.",
+            keyboard=ai_collect_menu("admin_ai_card"),
+        )
+        return
+    payload = dict(message.state_peer.payload)
+    source_parts = list(payload.get("source_parts", []))
+    source_parts.append(text)
+    payload["source_parts"] = source_parts
+    await state_dispenser.set(
+        message.peer_id, AdminCardState.ADD_AI_SOURCE, **payload
+    )
+    await message.answer(
+        f"Добавлено фрагментов: {len(source_parts)}. Можно продолжить или обработать.",
+        keyboard=ai_collect_menu("admin_ai_card"),
+    )
+
+
+@labeler.message(payload={"cmd": "admin_ai_card_confirm"})
+async def confirm_ai_card(message: Message, **_: object) -> None:
+    payload = await _wizard_payload(message, AdminCardState.ADD_AI_CONFIRM)
+    if payload is None:
+        return
+    draft = ai_service.CardDraft.model_validate(payload["draft"])
+    wizard_payload: dict[str, object] = {
+        "card_type": payload["card_type"],
+        "character_id": payload.get("character_id"),
+        "name": draft.name,
+        "kind": draft.kind,
+        "rarity": draft.rarity.name,
+        "description": draft.description,
+        "usage": draft.usage,
+        "ai_complete": True,
+    }
+    card_type = parse_card_type(str(payload["card_type"]))
+    if card_type is CardType.SPECIAL:
+        await state_dispenser.set(
+            message.peer_id, AdminCardState.ADD_NUMBER, **wizard_payload
+        )
+        await message.answer(
+            "AI-карточка готова. Теперь укажите номер Особого слота от 0 до 99.",
+            keyboard=cancel(),
+        )
+        return
+    await _create_wizard_card(message, wizard_payload)
 
 
 @labeler.message(payload_contains={"cmd": "admin_card_contour_subtype"})
@@ -159,7 +305,10 @@ async def choose_special_limit(message: Message, **_: object) -> None:
     except ServiceError as error:
         await message.answer(str(error), keyboard=special_card_limit_menu())
         return
-    await _ask_description(message, payload)
+    if payload.get("ai_complete"):
+        await _create_wizard_card(message, payload)
+    else:
+        await _ask_description(message, payload)
 
 
 @labeler.message(payload={"cmd": "admin_card_limit_custom"})
@@ -208,29 +357,56 @@ async def skip_spell_consumption(message: Message, **_: object) -> None:
 
 @labeler.message(state=AdminCardState.ADD_TEMPLATE)
 async def do_add_template(message: Message, **_: object) -> None:
+    state_payload = dict(message.state_peer.payload)
+    character_id: int | None = None
     async with get_session() as session:
         try:
-            card_type = parse_card_type(message.state_peer.payload["card_type"])
+            card_type = parse_card_type(state_payload["card_type"])
             draft = parse_card_template(card_type, message.text)
-            card = await card_service.create_card(
-                session,
-                name=draft.name,
-                card_type=draft.card_type,
-                kind=draft.kind,
-                rarity=draft.rarity,
-                transform_limit=draft.transform_limit,
-                number=draft.number,
-                description=draft.description,
-                usage=draft.usage,
-                admin_vk_id=message.from_id,
-            )
-            text = formatters.card_full(card, live_copies=0)
+            if card_type is CardType.ORDINARY:
+                character_id = parse_positive_int(
+                    str(state_payload.get("character_id", "")),
+                    field="ID анкеты",
+                )
+                ownership = await card_service.grant_ordinary_card(
+                    session,
+                    character_id=character_id,
+                    name=draft.name,
+                    kind=draft.kind,
+                    rarity=draft.rarity,
+                    description=draft.description,
+                    usage=draft.usage,
+                )
+                character = await characters_crud.get_by_id(session, character_id)
+                text = (
+                    f"Обычная карта «{ownership.display_name}» добавлена персонажу "
+                    f"#{character.id} · {character.name}."
+                )
+            else:
+                card = await card_service.create_card(
+                    session,
+                    name=draft.name,
+                    card_type=draft.card_type,
+                    kind=draft.kind,
+                    rarity=draft.rarity,
+                    transform_limit=draft.transform_limit,
+                    number=draft.number,
+                    description=draft.description,
+                    usage=draft.usage,
+                    admin_vk_id=message.from_id,
+                )
+                text = "Карта добавлена.\n\n" + formatters.card_full(card, live_copies=0)
         except ServiceError as error:
             await message.answer(str(error), keyboard=cancel())
             return
 
     await clear_state(message.peer_id)
-    await message.answer(f"Карта добавлена.\n\n{text}", keyboard=back_to_admin_cards())
+    keyboard = (
+        admin_character_cards_menu(character_id)
+        if card_type is CardType.ORDINARY
+        else back_to_admin_cards()
+    )
+    await message.answer(text, keyboard=keyboard)
 
 
 @labeler.message(state=AdminCardState.ADD_NAME)
@@ -239,17 +415,20 @@ async def save_wizard_name(message: Message, **_: object) -> None:
     if not name:
         await message.answer("Название не может быть пустым.", keyboard=cancel())
         return
+    payload = dict(message.state_peer.payload)
+    card_type = parse_card_type(str(payload["card_type"]))
     async with get_session() as session:
-        if await cards_crud.get_by_name(session, name) is not None:
+        if (
+            card_type is not CardType.ORDINARY
+            and await cards_crud.get_by_name(session, name) is not None
+        ):
             await message.answer(
                 f"Карта «{name}» уже есть в реестре. Пришлите другое название.",
                 keyboard=cancel(),
             )
             return
 
-    payload = dict(message.state_peer.payload)
     payload["name"] = name
-    card_type = parse_card_type(str(payload["card_type"]))
     if card_type is CardType.CONTOUR:
         await state_dispenser.set(
             message.peer_id, AdminCardState.ADD_CONTOUR_SUBTYPE, **payload
@@ -258,9 +437,28 @@ async def save_wizard_name(message: Message, **_: object) -> None:
             "Выберите подтип Контурной карты:",
             keyboard=contour_subtype_menu(),
         )
+    elif card_type is CardType.ORDINARY:
+        await state_dispenser.set(
+            message.peer_id, AdminCardState.ADD_KIND, **payload
+        )
+        await message.answer(
+            "Что находится в карте? Например: предмет, оружие, еда, инструмент.",
+            keyboard=cancel(),
+        )
     else:
         payload["kind"] = card_type.value
         await _ask_rarity(message, payload)
+
+
+@labeler.message(state=AdminCardState.ADD_KIND)
+async def save_ordinary_kind(message: Message, **_: object) -> None:
+    kind = message.text.strip()
+    if not kind:
+        await message.answer("Вид содержимого не может быть пустым.", keyboard=cancel())
+        return
+    payload = dict(message.state_peer.payload)
+    payload["kind"] = kind
+    await _ask_rarity(message, payload)
 
 
 @labeler.message(state=AdminCardState.ADD_NUMBER)
@@ -300,7 +498,10 @@ async def save_custom_special_limit(message: Message, **_: object) -> None:
         return
     payload = dict(message.state_peer.payload)
     payload["transform_limit"] = limit
-    await _ask_description(message, payload)
+    if payload.get("ai_complete"):
+        await _create_wizard_card(message, payload)
+    else:
+        await _ask_description(message, payload)
 
 
 @labeler.message(state=AdminCardState.ADD_DESCRIPTION)
@@ -420,27 +621,50 @@ async def _create_wizard_card(
 ) -> None:
     async with get_session() as session:
         try:
-            card = await card_service.create_card(
-                session,
-                name=str(payload["name"]),
-                card_type=parse_card_type(str(payload["card_type"])),
-                kind=str(payload["kind"]),
-                rarity=parse_rarity(str(payload["rarity"])),
-                transform_limit=payload.get("transform_limit"),
-                number=payload.get("number"),
-                description=str(payload.get("description", "")),
-                usage=str(payload.get("usage", "")),
-                admin_vk_id=message.from_id,
-            )
-            text = formatters.card_full(card, live_copies=0)
+            card_type = parse_card_type(str(payload["card_type"]))
+            if card_type is CardType.ORDINARY:
+                character_id = parse_positive_int(
+                    str(payload.get("character_id", "")), field="ID анкеты"
+                )
+                ownership = await card_service.grant_ordinary_card(
+                    session,
+                    character_id=character_id,
+                    name=str(payload["name"]),
+                    kind=str(payload["kind"]),
+                    rarity=parse_rarity(str(payload["rarity"])),
+                    description=str(payload.get("description", "")),
+                    usage=str(payload.get("usage", "")),
+                )
+                character = await characters_crud.get_by_id(session, character_id)
+                text = (
+                    f"Обычная карта «{ownership.display_name}» добавлена персонажу "
+                    f"#{character.id} · {character.name}."
+                )
+            else:
+                card = await card_service.create_card(
+                    session,
+                    name=str(payload["name"]),
+                    card_type=card_type,
+                    kind=str(payload["kind"]),
+                    rarity=parse_rarity(str(payload["rarity"])),
+                    transform_limit=payload.get("transform_limit"),
+                    number=payload.get("number"),
+                    description=str(payload.get("description", "")),
+                    usage=str(payload.get("usage", "")),
+                    admin_vk_id=message.from_id,
+                )
+                text = "Карта добавлена.\n\n" + formatters.card_full(card, live_copies=0)
         except ServiceError as error:
             await message.answer(str(error), keyboard=cancel())
             return
 
     await clear_state(message.peer_id)
-    await message.answer(
-        f"Карта добавлена.\n\n{text}", keyboard=back_to_admin_cards()
+    keyboard = (
+        admin_character_cards_menu(int(payload["character_id"]))
+        if parse_card_type(str(payload["card_type"])) is CardType.ORDINARY
+        else back_to_admin_cards()
     )
+    await message.answer(text, keyboard=keyboard)
 
 
 def _optional_text(value: str) -> str:

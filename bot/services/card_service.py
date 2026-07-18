@@ -23,15 +23,29 @@ async def create_card(
         raise ValidationError("Название карты не может быть пустым.")
     if not kind.strip():
         raise ValidationError("Вид карты не может быть пустым.")
+    if card_type is CardType.ORDINARY:
+        raise ValidationError(
+            "Обычные карты не создаются в реестре — добавьте карту сразу персонажу."
+        )
+    if card_type is CardType.SPECIAL and number is None:
+        raise ValidationError("Для Особой карты укажите номер слота от 0 до 99.")
     if number is not None and not 0 <= number <= 99:
         raise ValidationError("Номер Особого слота должен быть от 0 до 99.")
+    if card_type is not CardType.SPECIAL and number is not None:
+        raise ValidationError("Номер Особого слота допустим только для Особой карты.")
     if transform_limit is not None and transform_limit < 1:
         raise ValidationError("Лимит преобразований должен быть больше нуля (или не задан вовсе).")
+    if card_type is not CardType.SPECIAL and transform_limit is not None:
+        raise ValidationError("Лимит преобразований задаётся только Особым картам.")
 
     if await cards_crud.get_by_name(session, name) is not None:
         raise ValidationError(f"Карта «{name.strip()}» уже есть в реестре.")
     if number is not None and await cards_crud.get_by_number(session, number) is not None:
         raise ValidationError(f"Особый слот №{number} уже занят.")
+
+    registry_number = None
+    if card_type in (CardType.SPELL, CardType.CONTOUR):
+        registry_number = await cards_crud.next_registry_number(session)
 
     return await cards_crud.create(
         session,
@@ -41,6 +55,7 @@ async def create_card(
         rarity=rarity,
         created_by=admin_vk_id,
         number=number,
+        registry_number=registry_number,
         description=description,
         usage=usage,
         transform_limit=transform_limit,
@@ -69,6 +84,10 @@ async def update_card(session: AsyncSession, card_id: int, **fields: object) -> 
 
     if "number" in fields:
         number = fields["number"]
+        if card.card_type is not CardType.SPECIAL:
+            raise ValidationError("Номер Особого слота допустим только для Особой карты.")
+        if number is None:
+            raise ValidationError("Особая карта должна иметь номер слота от 0 до 99.")
         if number is not None:
             if not isinstance(number, int) or not 0 <= number <= 99:
                 raise ValidationError("Номер Особого слота должен быть от 0 до 99.")
@@ -77,6 +96,8 @@ async def update_card(session: AsyncSession, card_id: int, **fields: object) -> 
                 raise ValidationError(f"Особый слот №{number} уже занят.")
 
     new_limit = fields.get("transform_limit", card.transform_limit)
+    if card.card_type is not CardType.SPECIAL and new_limit is not None:
+        raise ValidationError("Лимит преобразований задаётся только Особым картам.")
     if new_limit is not None:
         if not isinstance(new_limit, int) or new_limit < 1:
             raise ValidationError("Лимит преобразований должен быть целым числом больше нуля.")
@@ -110,9 +131,15 @@ async def find_card(session: AsyncSession, query: str) -> Card:
         raise ValidationError("Укажите название карты.")
 
     if query.isdigit():
-        by_number = await cards_crud.get_by_number(session, int(query))
-        if by_number is not None:
-            return by_number
+        number = int(query)
+        special = await cards_crud.get_by_number(session, number)
+        registry = await cards_crud.get_by_registry_number(session, number)
+        if special is not None and registry is not None:
+            raise ValidationError(
+                f"Номер {number} есть в обоих пулах. Уточните название карты."
+            )
+        if special is not None or registry is not None:
+            return special or registry
 
     exact = await cards_crud.get_by_name(session, query)
     if exact is not None:
@@ -140,6 +167,8 @@ async def grant_card(session: AsyncSession, card_id: int, character_id: int) -> 
     card = await cards_crud.get_by_id_for_update(session, card_id)
     if card is None:
         raise NotFoundError("Карта не найдена.")
+    if card.card_type is CardType.GM:
+        raise ValidationError("Карты ГеймМастеров нельзя выдавать персонажам.")
 
     character = await characters_crud.get_by_id(session, character_id)
     if character is None:
@@ -156,6 +185,47 @@ async def grant_card(session: AsyncSession, card_id: int, character_id: int) -> 
     card.copies_count = live_copies + 1
     await session.flush()
     return ownership
+
+
+async def grant_ordinary_card(
+    session: AsyncSession,
+    *,
+    character_id: int,
+    name: str,
+    kind: str,
+    rarity: Rarity,
+    description: str = "",
+    usage: str = "",
+) -> CardOwnership:
+    if not name.strip():
+        raise ValidationError("Название Обычной карты не может быть пустым.")
+    if not kind.strip():
+        raise ValidationError("Вид Обычной карты не может быть пустым.")
+    character = await characters_crud.get_by_id(session, character_id)
+    if character is None:
+        raise NotFoundError("Персонаж не найден.")
+    return await cards_crud.add_ordinary_ownership(
+        session,
+        character_id=character_id,
+        name=name,
+        kind=kind,
+        rarity=rarity,
+        description=description,
+        usage=usage,
+    )
+
+
+async def revoke_ordinary_card(
+    session: AsyncSession, *, character_id: int, name: str
+) -> None:
+    ownership = await cards_crud.get_free_ordinary_ownership(
+        session, character_id, name
+    )
+    if ownership is None:
+        raise NotFoundError(
+            "Свободная Обычная карта с таким названием у персонажа не найдена."
+        )
+    await cards_crud.remove_ownership(session, ownership)
 
 
 async def revoke_card(session: AsyncSession, card_id: int, character_id: int) -> None:

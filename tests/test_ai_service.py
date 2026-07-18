@@ -278,3 +278,35 @@ async def test_contour_ai_cannot_change_selected_cards(monkeypatch):
     assert "Запрещено добавлять, заменять" in messages[0]["content"]
     assert "Карта #1: Покров" in messages[1]["content"]
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_card_ai_receives_selected_type_and_system_context(monkeypatch):
+    content = json.dumps(
+        {
+            "name": "Грозовая печать",
+            "kind": "Заклинание",
+            "description": "Поражает отмеченную цель молнией.",
+            "usage": "Команда активации: Гроза. Расходуется после применения.",
+            "rarity": "H",
+        },
+        ensure_ascii=False,
+    )
+    completions = _FakeCompletions(content)
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setattr(
+        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    draft = await ai_service.generate_card(
+        "Молния по цели, после этого карта пропадает",
+        ai_service.CardType.SPELL,
+    )
+
+    assert draft.name == "Грозовая печать"
+    messages = completions.request["messages"]
+    assert "Тип карты уже выбран администратором: Заклинание" in messages[0]["content"]
+    assert "Не меняй его" in messages[0]["content"]
+    assert "Молния по цели" in messages[1]["content"]
+    get_settings.cache_clear()

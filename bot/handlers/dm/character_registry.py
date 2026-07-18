@@ -52,7 +52,7 @@ async def show_character(
             return
         cards = await cards_crud.list_character_cards(session, character.id)
         text = (
-            f"Владелец: VK {character.vk_id}\n\n"
+            f"Владелец: https://vk.ru/id{character.vk_id}\n\n"
             + formatters.character_profile(character, cards)
         )
         can_view_contours = is_admin or character.vk_id == message.from_id
@@ -91,7 +91,7 @@ async def _show_registry_page(
         for character in characters:
             status = " · не подтверждена" if not character.is_approved else ""
             lines.append(
-                f"#{character.id} · {character.name} · VK {character.vk_id} · "
+                f"#{character.id} · {character.name} · https://vk.ru/id{character.vk_id} · "
                 f"{character.overall_rating.value}{status}"
             )
         text = (

@@ -9,3 +9,6 @@ venv/
 .idea/
 .vscode/
 .vkbottle
+outputs/
+backups/
+.codex-bot.*.log
