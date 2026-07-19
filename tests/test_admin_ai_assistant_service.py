@@ -9,6 +9,10 @@ from bot.services import admin_ai_assistant_service as service
 from bot.services.admin_ai import read_tools, write_tools
 from bot.services.errors import ValidationError
 from bot.services.errors import PermissionDenied
+from bot.services.vk_discussion_service import (
+    DiscussionApplication,
+    DiscussionPhoto,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +92,159 @@ async def test_character_creation_can_atomically_attach_current_image(
             "make_primary": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_discussion_import_is_planned_then_creates_approved_character(
+    session, monkeypatch
+):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    application = DiscussionApplication(
+        group_id=240214251,
+        topic_id=68811646,
+        comment_id=77,
+        author_vk_id=485208149,
+        author_name="Слава Игрок",
+        author_screen_name="slava",
+        text="Анкета Пикколо",
+        created_at=123,
+        photos=(
+            DiscussionPhoto(
+                url="https://sun.userapi.com/piccolo.jpg",
+                attachment="photo485208149_9_key",
+                width=900,
+                height=1400,
+            ),
+        ),
+        content_hash="a" * 64,
+    )
+
+    async def fake_get_application(_comment_id):
+        return application
+
+    added_arts = []
+
+    async def fake_add_from_vk(_session, **kwargs):
+        added_arts.append(kwargs)
+        return SimpleNamespace(id=91, character_id=kwargs["character_id"])
+
+    monkeypatch.setattr(
+        write_tools.vk_discussion_service,
+        "get_application",
+        fake_get_application,
+    )
+    monkeypatch.setattr(
+        write_tools.character_art_service,
+        "add_from_vk",
+        fake_add_from_vk,
+    )
+
+    plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Импортировать Пикколо из обсуждения",
+        actions=[
+            {
+                "name": "character_import_discussion",
+                "arguments": {
+                    "comment_id": 77,
+                    "name": "Пикколо",
+                    "fields": {
+                        "age": 31,
+                        "gender": "Мужской",
+                        "stress_resistance": 4,
+                        "speech": 3,
+                        "intuition": 4,
+                        "spine": 5,
+                        "will": 3,
+                        "scent": 3,
+                    },
+                    "include_photos": True,
+                },
+                "description": "Импортировать анкету и основной арт",
+            }
+        ],
+        warnings=[],
+    )
+
+    assert await characters_crud.get_by_discussion_source(
+        session,
+        group_id=240214251,
+        topic_id=68811646,
+        comment_id=77,
+    ) is None
+
+    executed, done = await service.confirm_plan(
+        session, plan_id=plan.id, admin_vk_id=500, peer_id=500
+    )
+
+    character = await characters_crud.get_by_discussion_source(
+        session,
+        group_id=240214251,
+        topic_id=68811646,
+        comment_id=77,
+    )
+    assert done is True
+    assert executed.status == "executed"
+    assert character is not None
+    assert character.name == "Пикколо"
+    assert character.vk_id == 485208149
+    assert character.is_approved is True
+    assert character.source_comment_hash == "a" * 64
+    assert added_arts[0]["vk_attachment"] == "photo485208149_9_key"
+    assert added_arts[0]["make_primary"] is True
+
+
+@pytest.mark.asyncio
+async def test_existing_character_can_be_linked_without_duplicate(session, monkeypatch):
+    ai_session, character = await _session_and_character(session)
+    application = DiscussionApplication(
+        group_id=240214251,
+        topic_id=68811646,
+        comment_id=88,
+        author_vk_id=character.vk_id,
+        author_name="Слава Игрок",
+        author_screen_name="slava",
+        text="Анкета Авы",
+        created_at=123,
+        photos=(),
+        content_hash="b" * 64,
+    )
+
+    async def fake_get_application(_comment_id):
+        return application
+
+    monkeypatch.setattr(
+        write_tools.vk_discussion_service,
+        "get_application",
+        fake_get_application,
+    )
+    plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Связать существующую анкету с обсуждением",
+        actions=[
+            {
+                "name": "character_link_discussion",
+                "arguments": {"character_id": character.id, "comment_id": 88},
+                "description": "Связать Аву с исходным комментарием",
+            }
+        ],
+        warnings=[],
+    )
+
+    await service.confirm_plan(
+        session, plan_id=plan.id, admin_vk_id=500, peer_id=500
+    )
+
+    characters = await characters_crud.list_by_vk_id(session, character.vk_id)
+    assert len(characters) == 1
+    assert character.source_comment_id == 88
+    assert character.source_comment_hash == "b" * 64
 
 
 @pytest.mark.asyncio

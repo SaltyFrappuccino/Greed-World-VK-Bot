@@ -94,6 +94,12 @@ class Character(Base):
     __tablename__ = "characters"
     __table_args__ = (
         CheckConstraint("contour_limit >= 2", name="ck_character_contour_limit"),
+        UniqueConstraint(
+            "source_group_id",
+            "source_topic_id",
+            "source_comment_id",
+            name="uq_character_discussion_source",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -121,6 +127,10 @@ class Character(Base):
     contour_limit: Mapped[int] = mapped_column(
         Integer, default=2, server_default="2"
     )
+    source_group_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_comment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source_comment_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     is_approved: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(

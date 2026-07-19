@@ -26,7 +26,7 @@ def normalize_action_arguments(
 ) -> dict[str, object]:
     """Перевести частые человекочитаемые поля LLM в строгий контракт."""
     result = deepcopy(arguments)
-    if name == "character_create":
+    if name in {"character_create", "character_import_discussion"}:
         _normalize_character_create(result)
     return result
 

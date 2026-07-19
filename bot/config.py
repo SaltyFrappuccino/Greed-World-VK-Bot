@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     vk_community_token: str
     vk_group_id: int
+    vk_board_token: str | None = None
+    vk_applications_topic_url: str | None = None
 
     admin_vk_ids: Annotated[list[int], NoDecode] = []
 

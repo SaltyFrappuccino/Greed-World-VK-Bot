@@ -13,3 +13,4 @@ outputs/
 backups/
 storage/
 *.log
+logs/

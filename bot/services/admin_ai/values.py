@@ -8,7 +8,8 @@ from bot.services.card_template_service import CONTOUR_SUBTYPES
 from bot.services.errors import NotFoundError, ValidationError
 
 WRITE_TOOLS = {
-    "character_create", "character_update", "character_delete", "character_approve",
+    "character_create", "character_import_discussion", "character_link_discussion",
+    "character_update", "character_delete", "character_approve",
     "character_set_stat", "character_set_rating", "character_change_owner",
     "card_create", "card_create_and_grant", "card_update", "card_delete",
     "card_grant", "card_revoke", "ordinary_card_grant", "ordinary_card_revoke",
@@ -20,6 +21,14 @@ WRITE_TOOLS = {
 }
 ACTION_FIELDS = {
     "character_create": ({"vk_id", "name", "fields", "arts"}, {"vk_id", "name"}),
+    "character_import_discussion": (
+        {"comment_id", "name", "fields", "owner_vk_id", "include_photos"},
+        {"comment_id", "name", "fields"},
+    ),
+    "character_link_discussion": (
+        {"character_id", "comment_id"},
+        {"character_id", "comment_id"},
+    ),
     "character_update": ({"character_id", "fields"}, {"character_id", "fields"}),
     "character_delete": ({"character_id"}, {"character_id"}),
     "character_approve": ({"character_id"}, {"character_id"}),
@@ -183,7 +192,7 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
         )
     for key in (
         "vk_id", "character_id", "card_id", "contour_id", "ownership_id",
-        "component_id", "art_id",
+        "component_id", "art_id", "comment_id", "owner_vk_id",
     ):
         if key in arguments and arguments[key] not in (None, ""):
             _integer(arguments, key)
@@ -212,7 +221,7 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
             _text(art, "source_url")
             if len(str(art.get("caption", ""))) > 500:
                 raise ValidationError("Подпись арта не может быть длиннее 500 символов.")
-    if name == "character_create":
+    if name in {"character_create", "character_import_discussion"}:
         _normalize_character_create_fields(
             _dict(arguments, "fields", optional=True)
         )

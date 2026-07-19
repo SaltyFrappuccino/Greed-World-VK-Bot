@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
+from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
 from bot.services import (
     card_service,
@@ -9,6 +10,7 @@ from bot.services import (
     character_service,
     contour_service,
     shakei_service,
+    vk_discussion_service,
 )
 from bot.services.admin_ai.values import (
     CARD_UPDATE_FIELDS,
@@ -34,6 +36,35 @@ async def _action_snapshot(
     session: AsyncSession, name: str, arguments: dict[str, object]
 ) -> dict[str, object]:
     result: dict[str, object] = {}
+    if name in {"character_import_discussion", "character_link_discussion"}:
+        application = await vk_discussion_service.get_application(
+            _integer(arguments, "comment_id")
+        )
+        existing = await characters_crud.get_by_discussion_source(
+            session,
+            group_id=application.group_id,
+            topic_id=application.topic_id,
+            comment_id=application.comment_id,
+        )
+        target_character_id = (
+            _integer(arguments, "character_id")
+            if name == "character_link_discussion"
+            else None
+        )
+        if existing is not None and existing.id != target_character_id:
+            raise ValidationError(
+                f"Комментарий #{application.comment_id} уже импортирован как "
+                f"анкета #{existing.id} · {existing.name}."
+            )
+        result[f"discussion:{application.comment_id}"] = {
+            "group_id": application.group_id,
+            "topic_id": application.topic_id,
+            "comment_id": application.comment_id,
+            "author_vk_id": application.author_vk_id,
+            "author_name": application.author_name,
+            "content_hash": application.content_hash,
+            "photo_count": len(application.photos),
+        }
     if "character_id" in arguments:
         character = await _character(session, _integer(arguments, "character_id"))
         result[f"character:{character.id}"] = _character_data(character)
@@ -162,6 +193,84 @@ async def _execute_action(
     admin_vk_id: int,
     plan_id: int,
 ) -> str:
+    if name == "character_link_discussion":
+        application = await vk_discussion_service.get_application(
+            _integer(arguments, "comment_id")
+        )
+        item = await _character(session, _integer(arguments, "character_id"))
+        existing = await characters_crud.get_by_discussion_source(
+            session,
+            group_id=application.group_id,
+            topic_id=application.topic_id,
+            comment_id=application.comment_id,
+        )
+        if existing is not None and existing.id != item.id:
+            raise ValidationError(
+                f"Комментарий уже связан с анкетой #{existing.id}."
+            )
+        await characters_crud.update(
+            session,
+            item,
+            source_group_id=application.group_id,
+            source_topic_id=application.topic_id,
+            source_comment_id=application.comment_id,
+            source_comment_hash=application.content_hash,
+        )
+        return (
+            f"Анкета #{item.id} · {item.name} связана с комментарием "
+            f"#{application.comment_id}."
+        )
+    if name == "character_import_discussion":
+        application = await vk_discussion_service.get_application(
+            _integer(arguments, "comment_id")
+        )
+        existing = await characters_crud.get_by_discussion_source(
+            session,
+            group_id=application.group_id,
+            topic_id=application.topic_id,
+            comment_id=application.comment_id,
+        )
+        if existing is not None:
+            raise ValidationError(
+                f"Комментарий уже импортирован как анкета #{existing.id}."
+            )
+        fields = _normalize_character_create_fields(
+            _dict(arguments, "fields", optional=True)
+        )
+        owner_vk_id = int(arguments.get("owner_vk_id") or application.author_vk_id)
+        item = await character_service.create_character(
+            session,
+            vk_id=owner_vk_id,
+            name=_text(arguments, "name"),
+            source_group_id=application.group_id,
+            source_topic_id=application.topic_id,
+            source_comment_id=application.comment_id,
+            source_comment_hash=application.content_hash,
+            **fields,
+        )
+        art_ids: list[int] = []
+        if bool(arguments.get("include_photos", True)):
+            for index, photo in enumerate(application.photos):
+                art = await character_art_service.add_from_vk(
+                    session,
+                    character_id=item.id,
+                    source_url=photo.url,
+                    vk_attachment=photo.attachment,
+                    caption=f"Арт из обсуждения · {item.name}",
+                    admin_vk_id=admin_vk_id,
+                    make_primary=index == 0,
+                )
+                art_ids.append(art.id)
+        suffix = (
+            " Прикреплены арты: " + ", ".join(f"#{art_id}" for art_id in art_ids) + "."
+            if art_ids
+            else ""
+        )
+        return (
+            f"Импортирована анкета #{item.id} · {item.name} из комментария "
+            f"#{application.comment_id}; владелец https://vk.ru/id{owner_vk_id}."
+            f"{suffix}"
+        )
     if name == "character_create":
         fields = _normalize_character_create_fields(_dict(arguments, "fields", optional=True))
         item = await character_service.create_character(session, vk_id=_integer(arguments, "vk_id"), name=_text(arguments, "name"), **fields)

@@ -57,9 +57,14 @@ Read-инструменты
 • get_shakei_history {character_id}.
 • query_database {entity,fields?,filters?,order_by?,limit?,offset?,mode?}. entity: characters, character_arts, cards, card_ownerships, card_usages, contours, contour_components, shakei_transactions. mode: rows|count. filters: [{field,op,value}], op: eq|ne|contains|starts_with|in|gt|gte|lt|lte|is_null. order_by: [{field,direction}], direction: asc|desc; limit ≤ 50.
 • export_character {character_id}; export_character_cards {character_id}; export_registry {}; create_backup {}.
+• list_discussion_applications {offset?,count?,only_missing?} — список комментариев-анкет из настроенного обсуждения VK и их статус импорта.
+• get_discussion_application {comment_id} — полный текст, автор и фотографии комментария.
+• analyze_discussion_application {comment_id} — разобрать текст и фотографии через vision-модель в поля анкеты. Используй перед импортом.
 
 Изменяющие инструменты
 • character_create {vk_id,name,fields,arts?}, где arts: [{image_index,caption?,make_primary?}]; character_update {character_id,fields}; character_delete {character_id}; character_approve {character_id}; character_set_stat {character_id,stat,value}; character_set_rating {character_id,rating}; character_change_owner {character_id,vk_id}.
+• character_import_discussion {comment_id,name,fields,owner_vk_id?,include_photos?} — импортировать проверенный комментарий обсуждения. По умолчанию владельцем становится числовой VK ID автора комментария, а все фотографии сохраняются как арты. Используй данные только из analyze_discussion_application. Если владелец не автор комментария, явно покажи замену владельца в плане.
+• character_link_discussion {character_id,comment_id} — отметить, что уже существующая анкета соответствует комментарию, не создавая дубликат. Если list_discussion_applications показывает подходящую same_owner_characters, сначала сравни имя через analyze_discussion_application и используй этот инструмент при уверенном совпадении.
   В character_create.fields допустимы только: age, gender, appearance, personality, biography, skills, additional, stress_resistance, speech, intuition, spine, will, scent, overall_rating, is_approved, contour_limit. Не создавай вложенные character, stats, weakness, rating, shakei или contours: разложи их сразу по перечисленным полям. Стартовые рейтинг H, Шакеи 0 и два пустых Контура можно не передавать.
 • card_create {name,card_type,kind,rarity,number?,description?,usage?,transform_limit?}; card_create_and_grant {character_id,name,card_type,kind,rarity,number?,description?,usage?,transform_limit?,quantity?}; card_update {card_id,fields}; card_delete {card_id}; card_grant {character_id,card_id,quantity?}; card_revoke {character_id,card_id,quantity?}.
 • ordinary_card_grant {character_id,name,kind,rarity,description?,usage?,quantity?}; ordinary_card_revoke {character_id,name,quantity?} или {character_id,ownership_id} для одной точной копии.

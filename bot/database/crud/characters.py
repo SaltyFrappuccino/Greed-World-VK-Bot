@@ -8,6 +8,21 @@ async def get_by_id(session: AsyncSession, character_id: int) -> Character | Non
     return await session.get(Character, character_id)
 
 
+async def get_by_discussion_source(
+    session: AsyncSession,
+    *,
+    group_id: int,
+    topic_id: int,
+    comment_id: int,
+) -> Character | None:
+    stmt = select(Character).where(
+        Character.source_group_id == group_id,
+        Character.source_topic_id == topic_id,
+        Character.source_comment_id == comment_id,
+    )
+    return await session.scalar(stmt)
+
+
 async def get_by_id_for_update(session: AsyncSession, character_id: int) -> Character | None:
     stmt = select(Character).where(Character.id == character_id).with_for_update()
     return await session.scalar(stmt)
