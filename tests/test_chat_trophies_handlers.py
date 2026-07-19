@@ -32,7 +32,6 @@ class DummyCharacter:
 
 @pytest.mark.asyncio
 async def test_award_parsing_handles_vk_mention_with_pipe(monkeypatch):
-    # Arrange
     msg = DummyMessage(from_id=99)
     args = "[id485208149|@idi_nahuy_dayn_tupoi] | Бронзовый | Тест | Тест | -"
 
@@ -56,10 +55,8 @@ async def test_award_parsing_handles_vk_mention_with_pipe(monkeypatch):
     monkeypatch.setattr(trophies_mod.trophy_service, "award", fake_award)
     monkeypatch.setattr(trophies_mod, "get_session", lambda: FakeCtx())
 
-    # Act
     await trophies_mod.award_trophy(msg, args)
 
-    # Assert
     assert msg._answers
     assert "Трофей выдан персонажу" in msg._answers[-1]
 
@@ -75,7 +72,6 @@ async def test_award_parsing_accepts_three_part_variant(monkeypatch):
     async def fake_award(session, *, character_id, name, rank, description, reward, admin_vk_id):
         assert character_id == 5
         assert name == "Тест"
-        # description should default to empty when '-' passed in 3-part variant
         return DummyTrophy(id=8, name=name)
 
     class FakeCtx:
@@ -102,7 +98,6 @@ async def test_delete_trophy_by_mention_and_index(monkeypatch):
         return DummyCharacter(id=10, name="X")
 
     async def fake_remove(session, *, trophy_id, admin_vk_id):
-        # Return deleted trophy object
         return DummyTrophy(id=trophy_id, name="Deleted")
 
     async def fake_list_for_character(session, character_id):

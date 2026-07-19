@@ -38,7 +38,6 @@ class Rarity(str, enum.Enum):
     SS = "SS"
 
 
-#: Порядок редкостей от низшей к высшей - для сортировки и валидации ввода.
 RARITY_ORDER: tuple[Rarity, ...] = tuple(Rarity)
 
 
@@ -69,9 +68,7 @@ class Card(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Номер Особого слота в отдельном пуле 0–99.
     number: Mapped[int | None] = mapped_column(Integer, unique=True, default=None)
-    # Общий публичный ID Заклинаний, Контурных и ГеймМастерских карт, начиная со 100.
     registry_number: Mapped[int | None] = mapped_column(Integer, default=None)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     card_type: Mapped[CardType] = mapped_column(
@@ -82,9 +79,7 @@ class Card(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     usage: Mapped[str] = mapped_column(Text, default="")
     rarity: Mapped[Rarity] = mapped_column(Enum(Rarity, native_enum=False))
-    # None - преобразования не ограничены.
     transform_limit: Mapped[int | None] = mapped_column(Integer, default=None)
-    # Денормализованный счётчик живых копий; источник истины - CardOwnership.
     copies_count: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
@@ -423,7 +418,6 @@ class ShakeiTransaction(Base):
     __tablename__ = "shakei_transactions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # None у отправителя - эмиссия админом; None у получателя - списание админом.
     from_character_id: Mapped[int | None] = mapped_column(
         ForeignKey("characters.id", ondelete="SET NULL"), default=None, index=True
     )
@@ -432,7 +426,6 @@ class ShakeiTransaction(Base):
     )
     amount: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(Text, default="")
-    # Кто из админов провёл операцию; у перевода между игроками - None.
     admin_vk_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

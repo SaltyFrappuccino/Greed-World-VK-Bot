@@ -7,7 +7,6 @@ from bot.services.errors import ServiceError
 from bot.services.navigation_service import render_return
 from bot.states import clear_state, return_context, state_dispenser
 
-# Все хендлеры этого модуля живут только в личных сообщениях сообщества.
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
 labeler.vbml_ignore_case = True
 
@@ -46,8 +45,6 @@ async def admin_denied(message: Message, **_: object) -> None:
     await message.answer("Админ-панель доступна только администраторам.", keyboard=main_menu(False))
 
 
-# Отдельный лейблер: main.py грузит его последним, иначе fallback съедал бы
-# сообщения, адресованные хендлерам других модулей.
 fallback_labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
 
 

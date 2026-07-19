@@ -17,7 +17,6 @@ class NavigationStateDispenser(BuiltinStateDispenser):
         await super().set(peer_id, state, **payload)
 
 
-#: Общий диспенсер: создаётся здесь, чтобы и хендлеры, и Bot работали с одним состоянием.
 state_dispenser = NavigationStateDispenser()
 
 

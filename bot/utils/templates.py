@@ -18,8 +18,6 @@ def parse_labeled_template(text: str, labels: dict[str, str]) -> dict[str, str]:
             result[field] = value.strip()
             continue
 
-        # Пояснение бота перед первой подписью тоже можно скопировать вместе
-        # с шаблоном — оно не должно мешать разбору.
         if current_field is None:
             continue
         result[current_field] = (result[current_field] + "\n" + line).strip()

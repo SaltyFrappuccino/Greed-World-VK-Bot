@@ -233,9 +233,6 @@ async def _create_from_fields(session, payload, fields, admin_vk_id: int) -> Con
 
 async def _require_state(message: Message, expected: str):
     state = await state_dispenser.get(message.peer_id)
-    # StateRepresentation в vkbottle определяет __eq__ и __ne__ несогласованно:
-    # для одного состояния оба оператора могут вернуть True. Сравниваем только
-    # через положительный __eq__, как это делает рабочий AI-роутер.
     if state is None or not state.state == expected:
         await message.answer(
             "Сценарий устарел или был отменён.", keyboard=back_to_admin_characters()

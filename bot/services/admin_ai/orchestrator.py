@@ -128,8 +128,6 @@ async def _process_message(
         )
         turn = await ai_service.generate_admin_assistant_turn(
             history,
-            # Текущие изображения должны оставаться видимыми модели и после
-            # read-инструмента либо отклонённого плана.
             image_urls=image_urls,
             request_id=request_id,
             round_number=round_number + 1,

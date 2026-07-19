@@ -4,7 +4,6 @@ from bot.database.crud import characters as characters_crud
 from bot.database.models import Character, Rarity
 from bot.services.errors import NotFoundError, ValidationError
 
-#: Поле модели -> как стат называется в игре.
 STAT_FIELDS: dict[str, str] = {
     "stress_resistance": "стрессоустойчивость",
     "speech": "речевой аппарат",
@@ -14,7 +13,6 @@ STAT_FIELDS: dict[str, str] = {
     "scent": "нюх",
 }
 
-#: Обратный индекс для разбора админского ввода («?стат чуйка 5»).
 STAT_ALIASES: dict[str, str] = {title: field for field, title in STAT_FIELDS.items()}
 
 STAT_MIN = 1

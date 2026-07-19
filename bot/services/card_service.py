@@ -190,7 +190,6 @@ async def grant_card_copies(
 ) -> list[CardOwnership]:
     """Atomically grant several independent physical copies."""
     quantity = _validate_quantity(quantity)
-    # Блокировка сериализует параллельные выдачи одной карты в PostgreSQL.
     card = await cards_crud.get_by_id_for_update(session, card_id)
     if card is None:
         raise NotFoundError("Карта не найдена.")

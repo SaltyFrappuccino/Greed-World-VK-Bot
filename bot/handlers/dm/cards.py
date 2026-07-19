@@ -120,7 +120,6 @@ async def search(message: Message, is_admin: bool = False, **_: object) -> None:
         if not is_admin:
             matches = [card for card in matches if card.card_type is not CardType.GM]
 
-        # Одно совпадение - сразу полная карточка, иначе список для уточнения.
         if len(matches) == 1 or query.isdigit():
             try:
                 card = await card_service.find_card(session, query)

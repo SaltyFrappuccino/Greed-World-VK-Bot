@@ -20,8 +20,6 @@ def create_bot() -> Bot:
     bot.labeler.message_view.register_middleware(LoggingMiddleware)
     bot.labeler.message_view.register_middleware(AuthMiddleware)
 
-    # Глобальные «Отмена» и «В меню» идут раньше обработчиков состояний.
-    # Fallback всегда остаётся последним.
     for labeler in [
         control_labeler,
         *admin_labelers,

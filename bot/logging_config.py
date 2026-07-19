@@ -15,8 +15,6 @@ def configure_logging(settings: Settings) -> None:
     root = logging.getLogger()
     root.setLevel(level)
 
-    # vkbottle installs its own console handler. Route it through the common
-    # handlers so terminal messages are not printed twice and also reach the file.
     vkbottle_logger = logging.getLogger("vkbottle")
     vkbottle_logger.handlers.clear()
     vkbottle_logger.propagate = True

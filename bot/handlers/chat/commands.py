@@ -12,7 +12,6 @@ from bot.utils.messages import answer_long
 from bot.utils.validators import extract_vk_id, strip_mentions
 from bot.utils.photos import art_attachment
 
-# Все хендлеры этого модуля живут только в беседах.
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=True)])
 labeler.vbml_ignore_case = True
 
@@ -51,7 +50,6 @@ async def card_command(message: Message, query: str, **_: object) -> None:
             await message.answer(str(error))
             return
 
-        # Для чата показываем счётчик по факту владений, а не денормализованное поле.
         live_copies = await cards_crud.count_owners(session, card.id)
         card.copies_count = live_copies
         await message.answer(formatters.card_short(card))

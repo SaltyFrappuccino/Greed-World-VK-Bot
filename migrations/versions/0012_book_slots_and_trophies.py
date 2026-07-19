@@ -16,7 +16,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Two phases avoid collisions with the unique index while shifting the pool.
     op.execute(
         "UPDATE cards SET registry_number = registry_number + 1000000 "
         "WHERE registry_number IS NOT NULL"

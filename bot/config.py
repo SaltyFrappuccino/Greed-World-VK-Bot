@@ -5,8 +5,6 @@ from typing import Annotated
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-# Драйверы, которые надо подставить, чтобы синхронный DATABASE_URL из .env
-# работал с async-движком SQLAlchemy. Ключ - схема из .env, значение - async-схема.
 _ASYNC_DRIVERS = {
     "sqlite": "sqlite+aiosqlite",
     "postgresql": "postgresql+asyncpg",

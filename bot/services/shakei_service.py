@@ -34,7 +34,6 @@ async def transfer(
     if from_character_id == to_character_id:
         raise ValidationError("Нельзя перевести Шакеи самому себе.")
 
-    # Одинаковый порядок блокировок не даёт встречным переводам создать deadlock.
     locked: dict[int, Character] = {}
     for character_id in sorted((from_character_id, to_character_id)):
         locked[character_id] = await _require_character(

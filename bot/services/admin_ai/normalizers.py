@@ -39,7 +39,6 @@ def _normalize_character_create(arguments: dict[str, object]) -> None:
         raise ValidationError("Поле fields новой анкеты должно быть объектом.")
     fields = dict(raw_fields)
 
-    # Flash-модели нередко выносят секции анкеты рядом с fields.
     for alias in ("character", "stats", "weakness", "rating", "shakei", "contours"):
         if alias in arguments:
             fields.setdefault(alias, arguments.pop(alias))
@@ -52,7 +51,6 @@ def _normalize_character_create(arguments: dict[str, object]) -> None:
     _flatten_stats(fields)
     _discard_starting_defaults(fields)
     _normalize_scalars(fields)
-    # Анкеты создаёт только администратор, отдельная модерация не нужна.
     fields["is_approved"] = True
     arguments["fields"] = fields
 
@@ -103,7 +101,6 @@ def _discard_starting_defaults(fields: dict[str, object]) -> None:
         raise ValidationError(
             "Новая анкета создаётся с 0 Шакеев; дальнейшие изменения журналируются отдельно."
         )
-    # Текстовый шаблон пустых Контуров не является записью Контура в БД.
     fields.pop("contours", None)
     fields.pop("контуры", None)
 

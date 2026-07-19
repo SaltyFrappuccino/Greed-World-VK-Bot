@@ -48,7 +48,6 @@ async def award_without_arguments(message: Message, **_: object) -> None:
 
 @admin_labeler.message(text="?выдатьтрофей <args>")
 async def award_trophy(message: Message, args: str, **_: object) -> None:
-    # Extract target (mention or id) as the first token. VK mentions are like [id123|Name]
     m = re.match(r"^\s*(\[[^\]]+\]|\S+)\s*\|\s*(.*)$", args, flags=re.DOTALL)
     if not m:
         await message.answer("Неверный формат команды.\n\n" + AWARD_HINT)
@@ -57,7 +56,6 @@ async def award_trophy(message: Message, args: str, **_: object) -> None:
     rest = m.group(2).strip()
 
     parts = [part.strip() for part in re.split(r"\s*\|\s*", rest)]
-    # Accept either 4 parts (rank|name|description|reward) or 3 parts (rank|name|reward)
     if len(parts) == 4:
         rank, name, description, reward = parts
     elif len(parts) == 3:
@@ -102,7 +100,6 @@ async def delete_without_arguments(message: Message, **_: object) -> None:
 
 @admin_labeler.message(text="?удалитьтрофей <args>")
 async def delete_trophy(message: Message, args: str, **_: object) -> None:
-    # Expect: <target> <index>
     m = re.match(r"^\s*(\[[^\]]+\]|#?\d+|\S+)\s+(\d+)\s*$", args)
     if not m:
         await message.answer(
@@ -114,12 +111,10 @@ async def delete_trophy(message: Message, args: str, **_: object) -> None:
 
     try:
         async with get_session() as session:
-            # Resolve character: if a VK mention, resolve by VK id and use existing logic
             if extract_vk_id(target) is not None:
                 vk_id = extract_vk_id(target)
                 character = await _resolve_mentioned_character(session, vk_id, target)
             else:
-                # treat target as character query like "#123" or numeric id
                 character = await character_service.find_character(session, target)
 
             trophies = await trophies_crud.list_for_character(session, character.id)
