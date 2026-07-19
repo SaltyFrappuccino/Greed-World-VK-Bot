@@ -9,7 +9,7 @@ from bot.services.errors import ServiceError
 
 WIDTH = 1200
 HEIGHT = 1600
-RENDER_VERSION = 5
+RENDER_VERSION = 7
 STAT_LABELS = (
     ("Стрессоустойчивость", "stress_resistance", "#EF6C8F"),
     ("Речевой аппарат", "speech", "#E89A55"),
@@ -74,7 +74,7 @@ def render_profile_card(data: ProfileCardData, art_bytes: bytes | None) -> bytes
         fill="#FFF7FC",
         anchor="lm",
     )
-    _draw_metadata_chips(image, data.age, data.gender, fonts)
+    metadata_right, metadata_center_y = _draw_metadata_chips(image, data.age, data.gender, fonts)
     draw = ImageDraw.Draw(image)
     draw.text(
         (1022.5, 645),
@@ -115,17 +115,26 @@ def render_profile_card(data: ProfileCardData, art_bytes: bytes | None) -> bytes
         font=fonts["body"],
         fill="#D6C8D2",
     )
+    # Remove trophy summary from Progress area — render compact badges next to metadata chips instead
     rank_counts = {rank: data.trophy_ranks.count(rank) for rank in ("GOLD", "SILVER", "BRONZE")}
-    trophy_y = panel_top + 227
-    draw.text(
-        (830, trophy_y),
-        f"Трофеи: {len(data.trophy_ranks)}",
-        font=fonts["small"],
-        fill="#D6C8D2",
-    )
-    draw.text((955, trophy_y), f"З {rank_counts['GOLD']}", font=fonts["small"], fill="#F4CC58")
-    draw.text((1010, trophy_y), f"С {rank_counts['SILVER']}", font=fonts["small"], fill="#BFC8D6")
-    draw.text((1065, trophy_y), f"Б {rank_counts['BRONZE']}", font=fonts["small"], fill="#C98A55")
+    # Draw compact badges to the right of metadata chips
+    badge_width = 46
+    badge_height = 26
+    gap = 8
+    start_x = metadata_right + 12
+    gy = int(metadata_center_y - badge_height / 2)
+    # Gold
+    gx = start_x
+    draw.rounded_rectangle((gx, gy, gx + badge_width, gy + badge_height), radius=8, fill="#F4CC58")
+    draw.text((gx + badge_width / 2, gy + badge_height / 2), f"{rank_counts['GOLD']}", font=fonts["small"], fill="#1A0F12", anchor="mm")
+    # Silver
+    sx = gx + badge_width + gap
+    draw.rounded_rectangle((sx, gy, sx + badge_width, gy + badge_height), radius=8, fill="#BFC8D6")
+    draw.text((sx + badge_width / 2, gy + badge_height / 2), f"{rank_counts['SILVER']}", font=fonts["small"], fill="#160D13", anchor="mm")
+    # Bronze
+    bx = sx + badge_width + gap
+    draw.rounded_rectangle((bx, gy, bx + badge_width, gy + badge_height), radius=8, fill="#C98A55")
+    draw.text((bx + badge_width / 2, gy + badge_height / 2), f"{rank_counts['BRONZE']}", font=fonts["small"], fill="#160D13", anchor="mm")
 
     footer = f"ЖАДНЫЙ МИР  •  АНКЕТА #{data.character_id}"
     footer_box = draw.textbbox((0, 0), footer, font=fonts["small"])
@@ -210,7 +219,7 @@ def _draw_metadata_chips(
     age: int | None,
     gender: str,
     fonts,
-) -> None:
+) -> tuple[int, float]:
     items: list[tuple[str, str]] = []
     if age is not None:
         items.append(("Возраст", str(age)))
@@ -242,7 +251,7 @@ def _draw_metadata_chips(
 
     draw = ImageDraw.Draw(canvas)
     center_y = (top + bottom) / 2
-    for chip_left, _chip_right, label, value, label_width in layouts:
+    for chip_left, chip_right, label, value, label_width in layouts:
         text_left = chip_left + 16
         draw.text(
             (text_left, center_y),
@@ -258,6 +267,9 @@ def _draw_metadata_chips(
             fill="#F2E8EF",
             anchor="lm",
         )
+    # Return rightmost x and vertical center for placement of additional small badges
+    rightmost = layouts[-1][1] if layouts else left
+    return rightmost, center_y
 
 
 def _wrapped_text(draw, text: str, position, max_width: int, font, fill: str, *, max_lines: int) -> None:
