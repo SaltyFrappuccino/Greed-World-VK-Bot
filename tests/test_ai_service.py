@@ -2,7 +2,9 @@ import json
 import logging
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import APIConnectionError
 
 from bot.config import get_settings
 from bot.services import ai_service
@@ -32,6 +34,22 @@ class _SequenceCompletions:
         content = self.contents.pop(0)
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+
+
+class _FlakyCompletions:
+    def __init__(self, content):
+        self.content = content
+        self.calls = 0
+
+    async def create(self, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            raise APIConnectionError(
+                request=httpx.Request("POST", "https://api.dslab.tech/v1/chat/completions")
+            )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))]
         )
 
 
@@ -83,6 +101,9 @@ async def test_admin_assistant_uses_json_mode_without_native_tools(monkeypatch, 
     assert "H, G, F, E, D, C, B, A, S, SS" in system_prompt
     assert "Уточняй минимально необходимое" in system_prompt
     assert "Тип карты определяет способ хранения" in system_prompt
+    assert "Каждый изменившийся стат записывай отдельным character_set_stat" in system_prompt
+    assert "При images=0 не создавай character_art_add" in system_prompt
+    assert "Не повторяй прежние аргументы" in system_prompt
     assert "Пример:" not in system_prompt
     assert "request.start request_id=test-request round=1" in caplog.text
     assert "request.done request_id=test-request round=1" in caplog.text
@@ -113,6 +134,40 @@ async def test_admin_assistant_repairs_invalid_model_json(monkeypatch):
     assert turn.message == "Готово"
     assert len(completions.requests) == 2
     assert completions.requests[1]["max_tokens"] == 1500
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_admin_assistant_retries_temporary_connection_error(monkeypatch, caplog):
+    content = json.dumps(
+        {
+            "kind": "answer",
+            "message": "Обсуждение прочитано.",
+            "tools": [],
+            "actions": [],
+            "warnings": [],
+        },
+        ensure_ascii=False,
+    )
+    completions = _FlakyCompletions(content)
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_AGENT_MAX_RETRIES", "2")
+    monkeypatch.setattr(admin_ai_llm, "RETRY_BASE_DELAY_SECONDS", 0)
+    monkeypatch.setattr(
+        admin_ai_llm, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    caplog.set_level(logging.INFO, logger="zhadny_mir.ai_agent.llm")
+    turn = await ai_service.generate_admin_assistant_turn(
+        [{"role": "user", "content": "Сравни анкету с обсуждением"}],
+        request_id="retry-request",
+        round_number=2,
+    )
+
+    assert turn.kind == "answer"
+    assert completions.calls == 2
+    assert "request.retry request_id=retry-request round=2 attempt=1" in caplog.text
     get_settings.cache_clear()
 
 

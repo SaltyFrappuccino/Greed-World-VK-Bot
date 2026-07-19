@@ -63,8 +63,11 @@ CHARACTER_CREATE_FIELDS = {
     "overall_rating", "is_approved", "contour_limit",
 }
 CHARACTER_UPDATE_FIELDS = {
-    "name", "vk_id", "age", "gender", "appearance", "personality", "biography",
+    "name", "age", "gender", "appearance", "personality", "biography",
     "skills", "additional",
+}
+CHARACTER_STAT_FIELDS = {
+    "stress_resistance", "speech", "intuition", "spine", "will", "scent",
 }
 CARD_UPDATE_FIELDS = {
     "name", "kind", "rarity", "number", "description", "usage", "transform_limit",
@@ -178,6 +181,52 @@ def _reject_unknown_fields(
         )
 
 
+def _validate_character_update_fields(
+    fields: dict[str, object], character_id: object
+) -> None:
+    unknown = set(fields) - CHARACTER_UPDATE_FIELDS
+    if not unknown:
+        return
+
+    corrections: list[str] = []
+    stats = sorted(unknown & CHARACTER_STAT_FIELDS)
+    if stats:
+        actions = "; ".join(
+            "character_set_stat "
+            f'{{"character_id":{character_id},"stat":"{stat}","value":{fields[stat]}}}'
+            for stat in stats
+        )
+        corrections.append(
+            "статы нельзя помещать в character_update.fields; создай отдельное "
+            f"действие для каждого стата: {actions}"
+        )
+    if unknown & {"overall_rating", "rating"}:
+        corrections.append(
+            "рейтинг меняется через character_set_rating {character_id,rating}"
+        )
+    if "vk_id" in unknown:
+        corrections.append(
+            "владелец меняется через character_change_owner {character_id,vk_id}"
+        )
+    if "contour_limit" in unknown:
+        corrections.append(
+            "лимит Контуров меняется через contour_limit_set {character_id,value}"
+        )
+    if unknown & {"shakei", "shakei_balance"}:
+        corrections.append(
+            "Шакеи меняются через shakei_change {character_id,delta}"
+        )
+
+    allowed = ", ".join(sorted(CHARACTER_UPDATE_FIELDS))
+    guidance = " ".join(corrections)
+    message = (
+        "Некорректный character_update: запрещённые поля: "
+        f"{', '.join(sorted(unknown))}. Допустимые fields: {allowed}. "
+        f"{guidance}"
+    )
+    raise ValidationError(message.strip())
+
+
 def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
     allowed, required = ACTION_FIELDS[name]
     unknown = set(arguments) - allowed
@@ -227,15 +276,7 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
         )
     if name == "character_update":
         fields = _dict(arguments, "fields")
-        _reject_unknown_fields(fields, CHARACTER_UPDATE_FIELDS, "анкеты")
-        if "vk_id" in fields:
-            try:
-                if int(fields["vk_id"]) <= 0:
-                    raise ValueError
-            except (TypeError, ValueError) as error:
-                raise ValidationError(
-                    "Поле vk_id владельца анкеты должно быть положительным числовым ID."
-                ) from error
+        _validate_character_update_fields(fields, arguments["character_id"])
     if "quantity" in arguments:
         quantity = _integer(arguments, "quantity")
         if quantity > 999:

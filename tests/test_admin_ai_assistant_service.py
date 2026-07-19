@@ -1053,4 +1053,76 @@ async def test_agent_repairs_rejected_card_plan_before_showing_it(session, monke
     assert outcome.plan.summary == "Исправленный план"
     assert outcome.plan.actions[0]["arguments"]["card_type"] == "Заклинание"
     assert "transform_limit" not in outcome.plan.actions[0]["arguments"]
-    assert "нарушает бизнес-правила" in str(histories[1])
+    assert "ПЛАН ОТКЛОНЁН" in str(histories[1])
+
+
+@pytest.mark.asyncio
+async def test_agent_repairs_character_stats_into_separate_actions(session, monkeypatch):
+    ai_session, character = await _session_and_character(session)
+    turns = iter(
+        [
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Первый план",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="character_update",
+                        arguments={
+                            "character_id": character.id,
+                            "fields": {
+                                "biography": "Обновлённая биография",
+                                "will": 4,
+                                "scent": 5,
+                            },
+                        },
+                    )
+                ],
+            ),
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Исправленный план",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="character_update",
+                        arguments={
+                            "character_id": character.id,
+                            "fields": {"biography": "Обновлённая биография"},
+                        },
+                    ),
+                    ai_service.AssistantAction(
+                        name="character_set_stat",
+                        arguments={"character_id": character.id, "stat": "will", "value": 4},
+                    ),
+                    ai_service.AssistantAction(
+                        name="character_set_stat",
+                        arguments={"character_id": character.id, "stat": "scent", "value": 5},
+                    ),
+                ],
+            ),
+        ]
+    )
+    histories = []
+
+    async def fake_turn(history, **_kwargs):
+        histories.append(history)
+        return next(turns)
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", fake_turn)
+    outcome = await service.process_message(
+        session,
+        session_id=ai_session.id,
+        admin_vk_id=500,
+        peer_id=500,
+        text="Обнови анкету по актуальной версии.",
+    )
+
+    assert outcome.plan is not None
+    assert [action["name"] for action in outcome.plan.actions] == [
+        "character_update",
+        "character_set_stat",
+        "character_set_stat",
+    ]
+    feedback = str(histories[1])
+    assert "ПЛАН ОТКЛОНЁН" in feedback
+    assert '"stat":"will","value":4' in feedback
+    assert '"stat":"scent","value":5' in feedback

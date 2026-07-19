@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     dslab_max_tokens: int = 4000
     dslab_agent_max_tokens: int = 8000
     dslab_agent_timeout_seconds: float = 180.0
+    dslab_agent_max_retries: int = 2
 
     @field_validator("admin_vk_ids", mode="before")
     @classmethod

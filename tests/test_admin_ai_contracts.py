@@ -82,3 +82,17 @@ def test_text_vk_name_cannot_be_used_as_internal_character_id() -> None:
             "character_update",
             {"character_id": "idi_nahuy_dayn_tupoi", "fields": {"age": "31"}},
         )
+
+
+def test_character_update_stat_error_explains_correct_actions() -> None:
+    with pytest.raises(ValidationError) as raised:
+        _validate_action_arguments(
+            "character_update",
+            {"character_id": 7, "fields": {"biography": "Новая", "will": 4, "scent": 5}},
+        )
+
+    message = str(raised.value)
+    assert "character_set_stat" in message
+    assert '"stat":"will","value":4' in message
+    assert '"stat":"scent","value":5' in message
+    assert "Допустимые fields" in message
