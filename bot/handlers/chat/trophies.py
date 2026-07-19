@@ -19,7 +19,9 @@ admin_labeler.vbml_ignore_case = True
 
 AWARD_HINT = (
     "Формат:\n"
-    "?выдатьтрофей @игрок | Ранг | Название | Описание | Награда\n\n"
+    "?выдатьтрофей @игрок | Ранг | Название | Описание | Награда\n"
+    "или\n"
+    "?выдатьтрофей @игрок | Ранг | Название | Награда\n\n"
     "Ранги: Бронзовый, Серебряный, Золотой. "
     "Если описания или награды нет, поставьте «-»."
 )
@@ -46,14 +48,28 @@ async def award_without_arguments(message: Message, **_: object) -> None:
 
 @admin_labeler.message(text="?выдатьтрофей <args>")
 async def award_trophy(message: Message, args: str, **_: object) -> None:
-    parts = [part.strip() for part in args.split("|")]
-    if len(parts) != 5:
-        await message.answer(AWARD_HINT)
+    # Extract target (mention or id) as the first token. VK mentions are like [id123|Name]
+    m = re.match(r"^\s*(\[[^\]]+\]|\S+)\s*\|\s*(.*)$", args, flags=re.DOTALL)
+    if not m:
+        await message.answer("Неверный формат команды.\n\n" + AWARD_HINT)
         return
-    target, rank, name, description, reward = parts
+    target = m.group(1).strip()
+    rest = m.group(2).strip()
+
+    parts = [part.strip() for part in re.split(r"\s*\|\s*", rest)]
+    # Accept either 4 parts (rank|name|description|reward) or 3 parts (rank|name|reward)
+    if len(parts) == 4:
+        rank, name, description, reward = parts
+    elif len(parts) == 3:
+        rank, name, reward = parts
+        description = "-"
+    else:
+        await message.answer("Неверное число частей команды.\n\n" + AWARD_HINT)
+        return
+
     vk_id = extract_vk_id(target)
     if vk_id is None:
-        await message.answer("В первой части команды упомяните игрока.\n\n" + AWARD_HINT)
+        await message.answer("В первой части команды упомяните игрока или укажите его id.\n\n" + AWARD_HINT)
         return
     try:
         async with get_session() as session:
