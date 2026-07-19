@@ -14,6 +14,7 @@ from bot.database.models import (
     CardUsage,
     Character,
     CharacterArt,
+    CharacterTrophy,
     Contour,
     ContourComponent,
     ShakeiTransaction,
@@ -31,6 +32,7 @@ MAX_RESULT_LENGTH = 9_000
 QUERY_ENTITIES = {
     "characters": Character,
     "character_arts": CharacterArt,
+    "character_trophies": CharacterTrophy,
     "cards": Card,
     "card_ownerships": CardOwnership,
     "card_usages": CardUsage,

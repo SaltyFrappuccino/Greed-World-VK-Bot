@@ -4,12 +4,15 @@ from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.services import (
     card_service,
     character_art_service,
     character_service,
     contour_service,
+    book_slot_service,
     shakei_service,
+    trophy_service,
     vk_discussion_service,
 )
 from bot.services.admin_ai.values import (
@@ -165,6 +168,19 @@ async def _action_snapshot(
             "is_primary": art.is_primary,
             "sha256": art.sha256,
             "storage_key": art.storage_key,
+        }
+    if "trophy_id" in arguments:
+        trophy_id = _integer(arguments, "trophy_id")
+        trophy = await trophies_crud.get_by_id(session, trophy_id)
+        if trophy is None:
+            raise NotFoundError(f"Трофей #{trophy_id} не найден.")
+        result[f"trophy:{trophy_id}"] = {
+            "id": trophy.id,
+            "character_id": trophy.character_id,
+            "name": trophy.name,
+            "rank": trophy.rank.value,
+            "description": trophy.description,
+            "reward": trophy.reward,
         }
     for raw_ownership_id in arguments.get("ownership_ids", []):
         ownership_id = int(raw_ownership_id)
@@ -424,6 +440,40 @@ async def _execute_action(
     if name == "contour_capacity_set":
         item = await contour_service.set_capacity(session, contour_id=_integer(arguments, "contour_id"), value=_integer(arguments, "value"), admin_vk_id=admin_vk_id)
         return f"Размер Контура #{item.id}: {item.card_capacity}."
+    if name == "free_slot_limit_set":
+        item = await book_slot_service.set_free_slot_limit(
+            session,
+            character_id=_integer(arguments, "character_id"),
+            value=_integer(arguments, "value"),
+            admin_vk_id=admin_vk_id,
+        )
+        return f"Свободных слотов анкеты #{item.id}: {item.free_slot_limit}."
+    if name == "trophy_award":
+        item = await trophy_service.award(
+            session,
+            character_id=_integer(arguments, "character_id"),
+            name=_text(arguments, "name"),
+            rank=_text(arguments, "rank"),
+            description=str(arguments.get("description", "")),
+            reward=str(arguments.get("reward", "")),
+            admin_vk_id=admin_vk_id,
+        )
+        return f"Выдан трофей #{item.id} · {item.name} анкете #{item.character_id}."
+    if name == "trophy_update":
+        item = await trophy_service.update(
+            session,
+            trophy_id=_integer(arguments, "trophy_id"),
+            admin_vk_id=admin_vk_id,
+            **_dict(arguments, "fields"),
+        )
+        return f"Обновлён трофей #{item.id} · {item.name}."
+    if name == "trophy_delete":
+        item = await trophy_service.remove(
+            session,
+            trophy_id=_integer(arguments, "trophy_id"),
+            admin_vk_id=admin_vk_id,
+        )
+        return f"Удалён трофей #{item.id} · {item.name}."
     if name == "contour_card_add":
         item = await contour_service.add_card(session, contour_id=_integer(arguments, "contour_id"), ownership_id=_integer(arguments, "ownership_id"), admin_vk_id=admin_vk_id)
         return f"Карта добавлена в Контур #{item.id}."

@@ -6,10 +6,12 @@ from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.database.models import Card, Character
 from bot.services import (
     art_storage_service,
     backup_service,
+    book_slot_service,
     card_service,
     character_service,
     database_query_service,
@@ -60,9 +62,22 @@ async def _run_read_tool(
         character = await _character(session, _integer(arguments, "character_id"))
         ownerships = await cards_crud.list_character_ownerships(session, character.id)
         contours = await contours_crud.list_for_character(session, character.id)
+        trophies = await trophies_crud.list_for_character(session, character.id)
+        slots = book_slot_service.calculate_usage(character, ownerships)
         data = _character_data(character)
         data["cards"] = [
-            {"ownership_id": item.id, "name": item.display_name, "type": item.display_type.value, "bound": item.contour_component is not None}
+            {
+                "ownership_id": item.id,
+                "card_id": item.card_id,
+                "public_card_id": (
+                    item.card.number
+                    if item.card is not None and item.card.card_type.value == "Особая"
+                    else item.card.registry_number if item.card is not None else None
+                ),
+                "name": item.display_name,
+                "type": item.display_type.value,
+                "bound": item.contour_component is not None,
+            }
             for item in ownerships
         ]
         stacks: dict[tuple[str, str, object], dict[str, object]] = {}
@@ -90,6 +105,23 @@ async def _run_read_tool(
         data["contours"] = [
             {"id": item.id, "slot": item.slot, "name": item.name, "capacity": item.card_capacity, "components": [component.card_ownership_id for component in item.components]}
             for item in contours
+        ]
+        data["book_slots"] = {
+            "special_used": slots.special_used,
+            "special_limit": slots.special_limit,
+            "free_used": slots.free_used,
+            "free_limit": slots.free_limit,
+            "free_remaining": slots.free_remaining,
+        }
+        data["trophies"] = [
+            {
+                "id": trophy.id,
+                "name": trophy.name,
+                "rank": trophy.rank.value,
+                "description": trophy.description,
+                "reward": trophy.reward,
+            }
+            for trophy in trophies
         ]
         arts = await arts_crud.list_for_character(session, character.id)
         data["arts"] = [

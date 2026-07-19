@@ -2,6 +2,7 @@ from vkbottle.bot import Message
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.database.engine import get_session
 from bot.database.models import CardType
 from bot.keyboards.admin_menu import (
@@ -19,7 +20,9 @@ from bot.keyboards.main_menu import (
     contour_detail_menu,
     main_menu,
 )
+from bot.keyboards.main.trophies import character_trophies_menu
 from bot.services import contour_service
+from bot.services import book_slot_service
 from bot.utils import formatters
 
 
@@ -88,6 +91,9 @@ async def render_return(
 
         await _show_character_arts(message, target_id, is_admin=is_admin)
         return
+    if screen == "character_trophies" and target_id:
+        await _character_trophies(message, target_id, is_admin=is_admin)
+        return
     if screen == "contour" and target_id:
         await _contour(message, target_id, is_admin=is_admin)
         return
@@ -102,7 +108,8 @@ async def _character_cards(message: Message, character_id: int) -> None:
             await message.answer("Анкета больше не существует.", keyboard=admin_characters_menu())
             return
         ownerships = await cards_crud.list_character_ownerships(session, character_id)
-        holdings = formatters.character_card_holdings(ownerships)
+        slots = await book_slot_service.get_usage(session, character_id)
+        holdings = formatters.character_card_holdings(ownerships, slots)
     await message.answer(
         f"Отменено. Карты персонажа #{character.id} · {character.name}\n\n{holdings}",
         keyboard=admin_character_cards_menu(character.id),
@@ -136,6 +143,26 @@ async def _character_shakei(message: Message, character_id: int) -> None:
     )
 
 
+async def _character_trophies(
+    message: Message, character_id: int, *, is_admin: bool
+) -> None:
+    async with get_session() as session:
+        character = await characters_crud.get_by_id(session, character_id)
+        trophies = (
+            await trophies_crud.list_for_character(session, character_id)
+            if character is not None
+            else []
+        )
+    if character is None:
+        await message.answer("Анкета больше не существует.", keyboard=main_menu(is_admin))
+        return
+    await message.answer(
+        f"Отменено. Трофеи персонажа #{character.id} · {character.name}\n\n"
+        + formatters.format_trophies(trophies),
+        keyboard=character_trophies_menu(character.id, is_admin=is_admin),
+    )
+
+
 async def _card(message: Message, card_id: int, *, is_admin: bool) -> None:
     async with get_session() as session:
         card = await cards_crud.get_by_id(session, card_id)
@@ -160,12 +187,24 @@ async def _character(message: Message, character_id: int, *, is_admin: bool) -> 
             if character is not None
             else []
         )
+        trophies = (
+            await trophies_crud.list_for_character(session, character_id)
+            if character is not None
+            else []
+        )
+        slots = (
+            await book_slot_service.get_usage(session, character_id)
+            if character is not None
+            else None
+        )
     if character is None:
         await message.answer("Анкета больше не существует.", keyboard=main_menu(is_admin))
         return
     await message.answer(
         f"Отменено.\n\nВладелец: https://vk.ru/id{character.vk_id}\n\n"
-        + formatters.character_profile(character, cards),
+        + formatters.character_profile(
+            character, cards, trophies=trophies, book_slots=slots
+        ),
         keyboard=character_registry_detail_menu(
             character.id,
             0,

@@ -145,7 +145,7 @@ async def test_ordinary_card_is_stored_only_on_character_ownership(session):
 
 
 @pytest.mark.asyncio
-async def test_spell_and_contour_share_number_pool_from_zero(session):
+async def test_spell_and_contour_share_public_id_pool_from_one_hundred(session):
     spell = await card_service.create_card(
         session,
         name="Искра",
@@ -163,7 +163,7 @@ async def test_spell_and_contour_share_number_pool_from_zero(session):
         admin_vk_id=99,
     )
 
-    assert (spell.registry_number, contour.registry_number) == (0, 1)
+    assert (spell.registry_number, contour.registry_number) == (100, 101)
 
 
 @pytest.mark.asyncio

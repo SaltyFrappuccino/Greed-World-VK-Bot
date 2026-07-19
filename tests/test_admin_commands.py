@@ -30,7 +30,7 @@ def _use_session(monkeypatch, session):
 
 
 @pytest.mark.asyncio
-async def test_admin_can_grant_and_revoke_card_by_database_ids(
+async def test_admin_can_grant_and_revoke_card_by_public_ids(
     session, monkeypatch
 ):
     character = await characters_crud.create(session, vk_id=1, name="Ава")
@@ -47,7 +47,7 @@ async def test_admin_can_grant_and_revoke_card_by_database_ids(
     _use_session(monkeypatch, session)
     message = _Message()
 
-    await commands.grant_card(message, str(character.id), str(card.id))
+    await commands.grant_card(message, str(character.id), str(card.number))
 
     assert (
         await cards_crud.get_ownership(session, card.id, character.id)
@@ -56,7 +56,7 @@ async def test_admin_can_grant_and_revoke_card_by_database_ids(
     assert f"#{character.id}" in message.answers[-1][0]
     assert f"#{card.id}" in message.answers[-1][0]
 
-    await commands.revoke_card(message, str(character.id), str(card.id))
+    await commands.revoke_card(message, str(character.id), str(card.number))
 
     assert await cards_crud.get_ownership(session, card.id, character.id) is None
 
@@ -91,9 +91,9 @@ async def test_profile_and_card_formatters_show_database_ids(session):
     profile = formatters.character_profile(character, [card], [])
 
     assert f"ID анкеты в БД: #{character.id}" in profile
-    assert f"#{card.id} · {card.name}" in profile
-    assert f"ID карты в БД: #{card.id}" in formatters.card_short(card)
-    assert f"ID карты в БД: #{card.id}" in formatters.card_full(card)
+    assert f"#{card.registry_number} · {card.name}" in profile
+    assert f"Внутренний ID БД: #{card.id}" in formatters.card_short(card)
+    assert f"Внутренний ID БД: #{card.id}" in formatters.card_full(card)
 
 
 def test_admin_id_commands_are_loaded_before_state_handlers(monkeypatch):

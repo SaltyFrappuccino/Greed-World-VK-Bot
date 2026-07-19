@@ -70,6 +70,14 @@ class AdminStatsState(BaseStateGroup):
     INPUT = "input"
 
 
+class AdminTrophyState(BaseStateGroup):
+    AWARD = "award"
+
+
+class AdminBookState(BaseStateGroup):
+    FREE_SLOT_LIMIT = "free_slot_limit"
+
+
 class AdminCharacterState(BaseStateGroup):
     OWNER = "owner"
     TEMPLATE = "template"
@@ -157,6 +165,10 @@ def default_return_context(
         return {"screen": "admin_characters"}
     if state_name.startswith("AdminStatsState"):
         return {"screen": "admin_characters"}
+    if state_name.startswith("AdminTrophyState") and character_id:
+        return {"screen": "character_trophies", "id": character_id}
+    if state_name.startswith("AdminBookState") and character_id:
+        return {"screen": "character", "id": character_id}
     if state_name.startswith("AdminContourState"):
         if state_name == AdminContourState.LIMIT_VALUE and character_id:
             return {"screen": "character", "id": character_id}

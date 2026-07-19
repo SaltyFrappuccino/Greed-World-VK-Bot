@@ -5,6 +5,7 @@ from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
 from bot.database.models import CardOwnership, CardType, Character, Contour
 from bot.services import auth_service
+from bot.services import book_slot_service
 from bot.services.errors import NotFoundError, PermissionDenied, ValidationError
 
 MIN_CONTOUR_LIMIT = 2
@@ -260,6 +261,14 @@ async def set_cards(
         capacity=contour.card_capacity,
         allowed_contour_id=contour.id,
     )
+    old_ids = {component.card_ownership_id for component in contour.components}
+    new_ids = set(ownership_ids)
+    await book_slot_service.ensure_binding_change_fits(
+        session,
+        character_id=contour.character_id,
+        bind_ids=new_ids - old_ids,
+        release_ids=old_ids - new_ids,
+    )
     for component in list(contour.components):
         await contours_crud.delete_component(session, component)
     for position, ownership in enumerate(ownerships, start=1):
@@ -297,6 +306,11 @@ async def remove_card(
         capacity=contour.card_capacity,
         allowed_contour_id=contour.id,
     )
+    await book_slot_service.ensure_binding_change_fits(
+        session,
+        character_id=contour.character_id,
+        release_ids={component.card_ownership_id},
+    )
     await contours_crud.delete_component(session, component)
     remaining = [item for item in contour.components if item.id != component_id]
     for position, item in enumerate(remaining, start=1):
@@ -329,6 +343,12 @@ async def replace_card(
         capacity=contour.card_capacity,
         allowed_contour_id=contour.id,
     )
+    await book_slot_service.ensure_binding_change_fits(
+        session,
+        character_id=contour.character_id,
+        bind_ids={ownership_id},
+        release_ids={component.card_ownership_id},
+    )
     component.card_ownership_id = ownership_id
     contour.composition = _composition(ownerships)
     await session.flush()
@@ -340,6 +360,11 @@ async def disassemble(
 ) -> tuple[int, str]:
     auth_service.require_admin(admin_vk_id)
     contour = await _require_contour_for_update(session, contour_id)
+    await book_slot_service.ensure_binding_change_fits(
+        session,
+        character_id=contour.character_id,
+        release_ids={item.card_ownership_id for item in contour.components},
+    )
     character_id, name = contour.character_id, contour.name
     await contours_crud.delete(session, contour)
     return character_id, name

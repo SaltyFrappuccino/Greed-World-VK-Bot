@@ -8,6 +8,7 @@ from vkbottle.dispatch.rules.base import PeerRule
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.database.engine import get_session
 from bot.database.models import Character
 from bot.keyboards.main_menu import (
@@ -15,7 +16,7 @@ from bot.keyboards.main_menu import (
     character_select_menu,
     profile_menu,
 )
-from bot.services import character_service, spreadsheet_service
+from bot.services import book_slot_service, character_service, spreadsheet_service
 from bot.services.errors import PermissionDenied, ServiceError
 from bot.states import clear_state
 from bot.utils import formatters
@@ -76,7 +77,8 @@ async def my_cards(message: Message, is_admin: bool = False, **_: object) -> Non
             return
 
         ownerships = await cards_crud.list_character_ownerships(session, character.id)
-        text = formatters.character_card_holdings(ownerships)
+        slots = await book_slot_service.get_usage(session, character.id)
+        text = formatters.character_card_holdings(ownerships, slots)
         await message.answer(
             f"Карты персонажа {character.name}:\n\n{text}",
             keyboard=profile_menu(character.id, is_admin=is_admin),
@@ -189,6 +191,8 @@ async def _show_character(
     is_admin: bool,
 ) -> None:
     cards = await cards_crud.list_character_cards(session, character.id)
+    trophies = await trophies_crud.list_for_character(session, character.id)
+    slots = await book_slot_service.get_usage(session, character.id)
     primary_art = await arts_crud.get_primary(session, character.id)
     attachment = (
         await art_attachment(message, primary_art)
@@ -197,7 +201,9 @@ async def _show_character(
     )
     await answer_long(
         message,
-        formatters.character_profile(character, cards),
+        formatters.character_profile(
+            character, cards, trophies=trophies, book_slots=slots
+        ),
         keyboard=profile_menu(character.id, is_admin=is_admin),
         attachment=attachment,
     )

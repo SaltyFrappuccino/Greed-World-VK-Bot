@@ -9,7 +9,7 @@ from bot.services.errors import ServiceError
 
 WIDTH = 1200
 HEIGHT = 1600
-RENDER_VERSION = 4
+RENDER_VERSION = 5
 STAT_LABELS = (
     ("Стрессоустойчивость", "stress_resistance", "#EF6C8F"),
     ("Речевой аппарат", "speech", "#E89A55"),
@@ -38,6 +38,9 @@ class ProfileCardData:
     card_counts: dict[str, int]
     contours_used: int
     contour_limit: int
+    free_slots_used: int = 0
+    free_slot_limit: int = 10
+    trophy_ranks: tuple[str, ...] | list[str] = ()
 
 
 def render_profile_card(data: ProfileCardData, art_bytes: bytes | None) -> bytes:
@@ -100,13 +103,29 @@ def render_profile_card(data: ProfileCardData, art_bytes: bytes | None) -> bytes
     draw.text((830, panel_top + 60), "ПРОГРЕСС", font=fonts["section"], fill=accent)
     draw.text((830, panel_top + 112), f"Шакеи: {data.shakei}", font=fonts["body_bold"], fill="#FFF5FA")
     total_cards = sum(data.card_counts.values())
-    draw.text((830, panel_top + 155), f"Карты: {total_cards}", font=fonts["body"], fill="#D6C8D2")
     draw.text(
-        (830, panel_top + 198),
+        (830, panel_top + 153),
+        f"Карты: {total_cards} · Слоты: {data.free_slots_used}/{data.free_slot_limit}",
+        font=fonts["meta"],
+        fill="#D6C8D2",
+    )
+    draw.text(
+        (830, panel_top + 190),
         f"Контуры: {data.contours_used}/{data.contour_limit}",
         font=fonts["body"],
         fill="#D6C8D2",
     )
+    rank_counts = {rank: data.trophy_ranks.count(rank) for rank in ("GOLD", "SILVER", "BRONZE")}
+    trophy_y = panel_top + 227
+    draw.text(
+        (830, trophy_y),
+        f"Трофеи: {len(data.trophy_ranks)}",
+        font=fonts["small"],
+        fill="#D6C8D2",
+    )
+    draw.text((955, trophy_y), f"З {rank_counts['GOLD']}", font=fonts["small"], fill="#F4CC58")
+    draw.text((1010, trophy_y), f"С {rank_counts['SILVER']}", font=fonts["small"], fill="#BFC8D6")
+    draw.text((1065, trophy_y), f"Б {rank_counts['BRONZE']}", font=fonts["small"], fill="#C98A55")
 
     footer = f"ЖАДНЫЙ МИР  •  АНКЕТА #{data.character_id}"
     footer_box = draw.textbbox((0, 0), footer, font=fonts["small"])

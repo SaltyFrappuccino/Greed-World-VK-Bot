@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.models import Card, CardOwnership, CardType, CardUsage, Rarity
+from bot.services import book_slot_service
 from bot.services.errors import NotFoundError, TransformLimitReached, ValidationError
 
 MAX_CARD_QUANTITY = 999
@@ -59,7 +60,7 @@ async def create_card(
         raise ValidationError(f"Особый слот №{number} уже занят.")
 
     registry_number = None
-    if card_type in (CardType.SPELL, CardType.CONTOUR):
+    if card_type in (CardType.SPELL, CardType.CONTOUR, CardType.GM):
         registry_number = await cards_crud.next_registry_number(session)
 
     return await cards_crud.create(
@@ -147,14 +148,13 @@ async def find_card(session: AsyncSession, query: str) -> Card:
 
     if query.isdigit():
         number = int(query)
-        special = await cards_crud.get_by_number(session, number)
-        registry = await cards_crud.get_by_registry_number(session, number)
-        if special is not None and registry is not None:
-            raise ValidationError(
-                f"Номер {number} есть в обоих пулах. Уточните название карты."
-            )
-        if special is not None or registry is not None:
-            return special or registry
+        card = (
+            await cards_crud.get_by_number(session, number)
+            if number < 100
+            else await cards_crud.get_by_registry_number(session, number)
+        )
+        if card is not None:
+            return card
 
     exact = await cards_crud.get_by_name(session, query)
     if exact is not None:
@@ -194,10 +194,7 @@ async def grant_card_copies(
     card = await cards_crud.get_by_id_for_update(session, card_id)
     if card is None:
         raise NotFoundError("Карта не найдена.")
-    if card.card_type is CardType.GM:
-        raise ValidationError("Карты ГеймМастеров нельзя выдавать персонажам.")
-
-    character = await characters_crud.get_by_id(session, character_id)
+    character = await characters_crud.get_by_id_for_update(session, character_id)
     if character is None:
         raise NotFoundError("Персонаж не найден.")
 
@@ -210,6 +207,12 @@ async def grant_card_copies(
             f"Нельзя выдать {quantity} коп.: у карты «{card.name}» уже "
             f"{live_copies} из {card.transform_limit} допустимых копий."
         )
+
+    await book_slot_service.ensure_new_copies_fit(
+        session,
+        character=character,
+        card_types=[(card.card_type, card.id)] * quantity,
+    )
 
     ownerships = [
         CardOwnership(card_id=card_id, character_id=character_id)
@@ -261,9 +264,14 @@ async def grant_ordinary_cards(
         raise ValidationError("Название Обычной карты не может быть пустым.")
     if not kind.strip():
         raise ValidationError("Вид Обычной карты не может быть пустым.")
-    character = await characters_crud.get_by_id(session, character_id)
+    character = await characters_crud.get_by_id_for_update(session, character_id)
     if character is None:
         raise NotFoundError("Персонаж не найден.")
+    await book_slot_service.ensure_new_copies_fit(
+        session,
+        character=character,
+        card_types=[(CardType.ORDINARY, None)] * quantity,
+    )
     ownerships = [
         CardOwnership(
             character_id=character_id,

@@ -119,8 +119,8 @@ def test_full_profile_export_contains_all_sections_and_contour_components():
     profile_sheet = workbook["Анкета"]
     assert profile_sheet["C4"].value == 7
     assert profile_sheet["C4"].number_format == "General"
-    assert profile_sheet["C23"].value == datetime(2026, 7, 18, 12, 30)
-    assert profile_sheet["C23"].number_format == "dd.mm.yyyy hh:mm"
+    assert profile_sheet["C25"].value == datetime(2026, 7, 18, 12, 30)
+    assert profile_sheet["C25"].number_format == "dd.mm.yyyy hh:mm"
 
 
 def test_character_filename_part_keeps_name_and_removes_forbidden_characters():

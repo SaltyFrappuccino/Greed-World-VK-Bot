@@ -40,19 +40,20 @@ async def grant_card(
         parsed_character_id = parse_positive_int(
             character_id, field="ID анкеты"
         )
-        parsed_card_id = parse_positive_int(card_id, field="ID карты")
+        public_card_id = parse_int(card_id.removeprefix("#"), field="Публичный ID карты")
+        if public_card_id < 0:
+            raise ValidationError("Публичный ID карты не может быть отрицательным.")
         parsed_quantity = parse_positive_int(quantity, field="Количество карт")
         async with get_session() as session:
-            card, character = await _get_card_and_character(
-                session, parsed_card_id, parsed_character_id
-            )
+            card = await card_service.find_card(session, str(public_card_id))
+            character = await _get_character(session, parsed_character_id)
             await card_service.grant_card_copies(
                 session,
-                parsed_card_id,
+                card.id,
                 parsed_character_id,
                 quantity=parsed_quantity,
             )
-            live_copies = await cards_crud.count_owners(session, parsed_card_id)
+            live_copies = await cards_crud.count_owners(session, card.id)
             limit_text = formatters.format_limit(card, live_copies)
     except ServiceError as error:
         await message.answer(str(error), keyboard=back_to_admin_cards())
@@ -60,7 +61,7 @@ async def grant_card(
 
     await clear_state(message.peer_id)
     await message.answer(
-        f"Карта #{card.id} · «{card.name}» выдана в количестве "
+        f"Карта {formatters.card_public_id(card)} · «{card.name}» выдана в количестве "
         f"{parsed_quantity} персонажу "
         f"#{character.id} · {character.name}.\nПреобразования: {limit_text}",
         keyboard=back_to_admin_cards(),
@@ -91,15 +92,16 @@ async def revoke_card(
         parsed_character_id = parse_positive_int(
             character_id, field="ID анкеты"
         )
-        parsed_card_id = parse_positive_int(card_id, field="ID карты")
+        public_card_id = parse_int(card_id.removeprefix("#"), field="Публичный ID карты")
+        if public_card_id < 0:
+            raise ValidationError("Публичный ID карты не может быть отрицательным.")
         parsed_quantity = parse_positive_int(quantity, field="Количество карт")
         async with get_session() as session:
-            card, character = await _get_card_and_character(
-                session, parsed_card_id, parsed_character_id
-            )
+            card = await card_service.find_card(session, str(public_card_id))
+            character = await _get_character(session, parsed_character_id)
             await card_service.revoke_card_copies(
                 session,
-                parsed_card_id,
+                card.id,
                 parsed_character_id,
                 quantity=parsed_quantity,
             )
@@ -109,7 +111,7 @@ async def revoke_card(
 
     await clear_state(message.peer_id)
     await message.answer(
-        f"Карта #{card.id} · «{card.name}» забрана в количестве "
+        f"Карта {formatters.card_public_id(card)} · «{card.name}» забрана в количестве "
         f"{parsed_quantity} у персонажа "
         f"#{character.id} · {character.name}.",
         keyboard=back_to_admin_cards(),
@@ -174,11 +176,8 @@ async def change_shakei(
     )
 
 
-async def _get_card_and_character(session, card_id: int, character_id: int):
-    card = await cards_crud.get_by_id(session, card_id)
-    if card is None:
-        raise ValidationError(f"Карта с ID #{card_id} не найдена.")
+async def _get_character(session, character_id: int):
     character = await characters_crud.get_by_id(session, character_id)
     if character is None:
         raise ValidationError(f"Анкета с ID #{character_id} не найдена.")
-    return card, character
+    return character

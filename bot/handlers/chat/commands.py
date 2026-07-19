@@ -3,8 +3,9 @@ from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.database.engine import get_session
-from bot.services import card_service, character_service
+from bot.services import book_slot_service, card_service, character_service
 from bot.services.errors import ServiceError
 from bot.utils import formatters
 from bot.utils.messages import answer_long
@@ -17,10 +18,11 @@ labeler.vbml_ignore_case = True
 
 HELP_TEXT = """Команды Жадного Мира:
 
-?карта [название] — карточка из реестра (можно по номеру Особого слота)
+?карта [название или публичный ID] — карточка из реестра
 ?профиль — своя анкета
 ?профиль Имя или ID — чужая анкета (или ответом/упоминанием)
 ?визитка [Имя или ID] — графическая карточка персонажа
+?трофеи [@игрок] — посмотреть трофеи персонажа
 ?кубик — бросок 1–20
 ?кубик 6 — бросок 1–6
 ?кубик 1 20 — бросок в своих границах
@@ -73,6 +75,8 @@ async def own_profile(message: Message, **_: object) -> None:
 
         character = characters[0]
         cards = await cards_crud.list_character_cards(session, character.id)
+        trophies = await trophies_crud.list_for_character(session, character.id)
+        slots = await book_slot_service.get_usage(session, character.id)
         primary_art = await arts_crud.get_primary(session, character.id)
         attachment = (
             await art_attachment(message, primary_art)
@@ -81,7 +85,7 @@ async def own_profile(message: Message, **_: object) -> None:
         )
         await answer_long(
             message,
-            formatters.character_profile(character, cards),
+            formatters.character_profile(character, cards, trophies=trophies, book_slots=slots),
             attachment=attachment,
         )
 
@@ -92,6 +96,8 @@ async def other_profile(message: Message, query: str, **_: object) -> None:
         try:
             character = await _resolve_target(session, message, query)
             cards = await cards_crud.list_character_cards(session, character.id)
+            trophies = await trophies_crud.list_for_character(session, character.id)
+            slots = await book_slot_service.get_usage(session, character.id)
             primary_art = await arts_crud.get_primary(session, character.id)
         except ServiceError as error:
             await message.answer(str(error))
@@ -104,7 +110,7 @@ async def other_profile(message: Message, query: str, **_: object) -> None:
         )
         await answer_long(
             message,
-            formatters.character_profile(character, cards),
+            formatters.character_profile(character, cards, trophies=trophies, book_slots=slots),
             attachment=attachment,
         )
 

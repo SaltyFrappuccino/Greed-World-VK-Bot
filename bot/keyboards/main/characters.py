@@ -44,6 +44,14 @@ def character_registry_detail_menu(
     can_view_contours: bool = False,
 ) -> str:
     keyboard = Keyboard(one_time=False, inline=False)
+    keyboard.add(
+        Text(
+            "Трофеи",
+            payload={"cmd": "character_trophies", "id": character_id},
+        ),
+        color=KeyboardButtonColor.PRIMARY,
+    )
+    keyboard.row()
     if is_admin:
         keyboard.add(
             Text(
@@ -85,6 +93,20 @@ def character_registry_detail_menu(
                     "cmd": "admin_character_contour_limit_set",
                     "id": character_id,
                 },
+            )
+        )
+        keyboard.row()
+        keyboard.add(
+            Text(
+                "Свободный слот +1",
+                payload={"cmd": "admin_character_free_slots_up", "id": character_id},
+            ),
+            color=KeyboardButtonColor.POSITIVE,
+        )
+        keyboard.add(
+            Text(
+                "Задать Свободные слоты",
+                payload={"cmd": "admin_character_free_slots_set", "id": character_id},
             )
         )
         keyboard.row()

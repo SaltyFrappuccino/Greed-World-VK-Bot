@@ -13,7 +13,7 @@ from bot.keyboards.admin_menu import (
 )
 from bot.keyboards.main_menu import cancel
 from bot.middlewares.auth import AdminRule
-from bot.services import card_service
+from bot.services import book_slot_service, card_service
 from bot.services.errors import ServiceError, ValidationError
 from bot.states import AdminCardState, clear_state, state_dispenser
 from bot.utils import formatters
@@ -34,7 +34,8 @@ async def character_cards(message: Message, **_: object) -> None:
             ownerships = await cards_crud.list_character_ownerships(
                 session, character_id
             )
-            text = formatters.character_card_holdings(ownerships)
+            slots = await book_slot_service.get_usage(session, character_id)
+            text = formatters.character_card_holdings(ownerships, slots)
     except ServiceError as error:
         await message.answer(str(error), keyboard=back_to_admin_characters())
         return
@@ -143,8 +144,8 @@ async def ask_registry_grant(message: Message, **_: object) -> None:
     await _ask_numbered_change(
         message,
         AdminCardState.CHARACTER_GRANT_REGISTRY,
-        "Введите общий номер Заклинания/Контурной карты и количество. "
-        "Например: 4 3.",
+        "Введите публичный ID реестровой карты (от 100) и количество. "
+        "Например: 104 3.",
     )
 
 
@@ -153,7 +154,7 @@ async def ask_registry_revoke(message: Message, **_: object) -> None:
     await _ask_numbered_change(
         message,
         AdminCardState.CHARACTER_REVOKE_REGISTRY,
-        "Введите общий номер Заклинания/Контурной карты и количество "
+        "Введите публичный ID реестровой карты (от 100) и количество "
         "списываемых свободных копий.",
     )
 
@@ -267,7 +268,8 @@ async def revoke_ordinary_card(message: Message, **_: object) -> None:
             ownerships = await cards_crud.list_character_ownerships(
                 session, character_id
             )
-            text = formatters.character_card_holdings(ownerships)
+            slots = await book_slot_service.get_usage(session, character_id)
+            text = formatters.character_card_holdings(ownerships, slots)
     except ServiceError as error:
         await message.answer(str(error), keyboard=cancel())
         return
@@ -308,7 +310,7 @@ async def _apply_numbered_card_change(
                 else await cards_crud.get_by_registry_number(session, number)
             )
             if card is None:
-                pool = "Особого слота" if special else "Заклинаний/Контурных карт"
+                pool = "Особого слота" if special else "реестровых карт"
                 raise ValidationError(f"В пуле {pool} нет карты №{number}.")
             character = await characters_crud.get_by_id(session, character_id)
             if character is None:
@@ -324,7 +326,8 @@ async def _apply_numbered_card_change(
             ownerships = await cards_crud.list_character_ownerships(
                 session, character_id
             )
-            holdings = formatters.character_card_holdings(ownerships)
+            slots = await book_slot_service.get_usage(session, character_id)
+            holdings = formatters.character_card_holdings(ownerships, slots)
     except ServiceError as error:
         await message.answer(str(error), keyboard=cancel())
         return
@@ -360,7 +363,8 @@ async def _apply_character_card_change(message: Message, *, revoke: bool) -> Non
             ownerships = await cards_crud.list_character_ownerships(
                 session, character_id
             )
-            text = formatters.character_card_holdings(ownerships)
+            slots = await book_slot_service.get_usage(session, character_id)
+            text = formatters.character_card_holdings(ownerships, slots)
     except ServiceError as error:
         await message.answer(str(error), keyboard=cancel())
         return

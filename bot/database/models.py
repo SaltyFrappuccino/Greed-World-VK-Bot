@@ -50,13 +50,19 @@ class CardType(str, enum.Enum):
     GM = "ГеймМастерская"
 
 
+class TrophyRank(str, enum.Enum):
+    BRONZE = "Бронзовый"
+    SILVER = "Серебряный"
+    GOLD = "Золотой"
+
+
 class Card(Base):
     __tablename__ = "cards"
     __table_args__ = (
         CheckConstraint(
             "(card_type = 'SPECIAL' AND number IS NOT NULL AND number >= 0 AND number <= 99 AND registry_number IS NULL) "
-            "OR (card_type IN ('SPELL', 'CONTOUR') AND number IS NULL AND registry_number IS NOT NULL AND registry_number >= 0) "
-            "OR (card_type = 'GM' AND number IS NULL AND registry_number IS NULL)",
+            "OR (card_type IN ('SPELL', 'CONTOUR', 'GM') AND number IS NULL "
+            "AND registry_number IS NOT NULL AND registry_number >= 100)",
             name="ck_card_number_pool",
         ),
         UniqueConstraint("registry_number", name="uq_cards_registry_number"),
@@ -65,7 +71,7 @@ class Card(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     # Номер Особого слота в отдельном пуле 0–99.
     number: Mapped[int | None] = mapped_column(Integer, unique=True, default=None)
-    # Общий игровой номер Заклинаний и Контурных карт, начиная с 0.
+    # Общий публичный ID Заклинаний, Контурных и ГеймМастерских карт, начиная со 100.
     registry_number: Mapped[int | None] = mapped_column(Integer, default=None)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     card_type: Mapped[CardType] = mapped_column(
@@ -94,6 +100,7 @@ class Character(Base):
     __tablename__ = "characters"
     __table_args__ = (
         CheckConstraint("contour_limit >= 2", name="ck_character_contour_limit"),
+        CheckConstraint("free_slot_limit >= 10", name="ck_character_free_slot_limit"),
         UniqueConstraint(
             "source_group_id",
             "source_topic_id",
@@ -127,6 +134,9 @@ class Character(Base):
     contour_limit: Mapped[int] = mapped_column(
         Integer, default=2, server_default="2"
     )
+    free_slot_limit: Mapped[int] = mapped_column(
+        Integer, default=10, server_default="10"
+    )
     source_group_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source_topic_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source_comment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -153,6 +163,32 @@ class Character(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    trophies: Mapped[list[CharacterTrophy]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+        order_by="CharacterTrophy.created_at, CharacterTrophy.id",
+    )
+
+
+class CharacterTrophy(Base):
+    """Постоянный трофей персонажа; это не Карта и он не занимает слот Книги."""
+
+    __tablename__ = "character_trophies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    rank: Mapped[TrophyRank] = mapped_column(Enum(TrophyRank, native_enum=False))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    reward: Mapped[str] = mapped_column(Text, default="", server_default="")
+    awarded_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    character: Mapped[Character] = relationship(back_populates="trophies")
 
 
 class CharacterArt(Base):

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.models import Card, CardType, Character, Rarity
-from bot.services import character_service
+from bot.services import character_service, trophy_service
 from bot.services.card_template_service import CONTOUR_SUBTYPES
 from bot.services.errors import NotFoundError, ValidationError
 
@@ -18,6 +18,7 @@ WRITE_TOOLS = {
     "contour_card_replace", "shakei_change",
     "character_art_add", "character_art_set_primary",
     "character_art_update_caption", "character_art_delete",
+    "free_slot_limit_set", "trophy_award", "trophy_update", "trophy_delete",
 }
 ACTION_FIELDS = {
     "character_create": ({"vk_id", "name", "fields", "arts"}, {"vk_id", "name"}),
@@ -56,6 +57,13 @@ ACTION_FIELDS = {
     "character_art_set_primary": ({"art_id"}, {"art_id"}),
     "character_art_update_caption": ({"art_id", "caption"}, {"art_id", "caption"}),
     "character_art_delete": ({"art_id"}, {"art_id"}),
+    "free_slot_limit_set": ({"character_id", "value"}, {"character_id", "value"}),
+    "trophy_award": (
+        {"character_id", "name", "rank", "description", "reward"},
+        {"character_id", "name", "rank"},
+    ),
+    "trophy_update": ({"trophy_id", "fields"}, {"trophy_id", "fields"}),
+    "trophy_delete": ({"trophy_id"}, {"trophy_id"}),
 }
 CHARACTER_CREATE_FIELDS = {
     "age", "gender", "appearance", "personality", "biography", "skills", "additional",
@@ -95,13 +103,15 @@ def _character_data(item: Character) -> dict[str, object]:
         "stress_resistance": item.stress_resistance, "speech": item.speech,
         "intuition": item.intuition, "spine": item.spine, "will": item.will, "scent": item.scent,
         "rating": item.overall_rating.value, "shakei": item.shakei_balance,
-        "contour_limit": item.contour_limit, "approved": item.is_approved,
+        "contour_limit": item.contour_limit, "free_slot_limit": item.free_slot_limit,
+        "approved": item.is_approved,
     }
 
 
 def _card_data(item: Card) -> dict[str, object]:
     return {
         "id": item.id, "number": item.number, "registry_number": item.registry_number,
+        "public_id": item.number if item.card_type is CardType.SPECIAL else item.registry_number,
         "name": item.name, "card_type": item.card_type.value, "kind": item.kind,
         "rarity": item.rarity.value, "description": item.description, "usage": item.usage,
         "transform_limit": item.transform_limit, "copies_count": item.copies_count,
@@ -241,7 +251,7 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
         )
     for key in (
         "vk_id", "character_id", "card_id", "contour_id", "ownership_id",
-        "component_id", "art_id", "comment_id", "owner_vk_id",
+        "component_id", "art_id", "trophy_id", "comment_id", "owner_vk_id",
     ):
         if key in arguments and arguments[key] not in (None, ""):
             _integer(arguments, key)
@@ -291,6 +301,20 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
                 "Для изъятия Обычной карты укажите либо ownership_id одной копии, "
                 "либо name и необязательное quantity."
             )
+    if name == "free_slot_limit_set" and _integer(arguments, "value") < 10:
+        raise ValidationError("Количество Свободных слотов не может быть меньше 10.")
+    if name == "trophy_award":
+        _text(arguments, "name")
+        trophy_service.parse_rank(_text(arguments, "rank"))
+    if name == "trophy_update":
+        fields = _dict(arguments, "fields")
+        unknown = set(fields) - {"name", "rank", "description", "reward"}
+        if unknown:
+            raise ValidationError(
+                "Трофей не имеет полей: " + ", ".join(sorted(unknown)) + "."
+            )
+        if "rank" in fields:
+            trophy_service.parse_rank(str(fields["rank"]))
         if has_ownership and int(arguments.get("quantity", 1)) != 1:
             raise ValidationError(
                 "При изъятии по ownership_id количество всегда равно 1; "
@@ -306,9 +330,6 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
         raise ValidationError(
             "Обычная карта не создаётся в реестре: используй ordinary_card_grant."
         )
-    if name == "card_create_and_grant" and card_type is CardType.GM:
-        raise ValidationError("Карту ГеймМастера нельзя выдавать персонажу.")
-
     number = _optional_int(arguments.get("number"))
     transform_limit = _optional_int(arguments.get("transform_limit"))
     if card_type is CardType.SPECIAL:

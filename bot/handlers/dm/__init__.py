@@ -1,4 +1,4 @@
-from bot.handlers.dm import arts, cards, character, character_registry, contours, menu, shakei
+from bot.handlers.dm import arts, cards, character, character_registry, contours, menu, shakei, trophies
 
 control_labeler = menu.labeler
 labelers = [
@@ -8,5 +8,6 @@ labelers = [
     character_registry.labeler,
     contours.labeler,
     shakei.labeler,
+    trophies.labeler,
 ]
 fallback_labeler = menu.fallback_labeler

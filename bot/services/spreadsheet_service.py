@@ -15,9 +15,10 @@ from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
-from bot.database.models import Card, CardOwnership, CardType, Character, CharacterArt, Contour
+from bot.database.crud import trophies as trophies_crud
+from bot.database.models import Card, CardOwnership, CardType, Character, CharacterArt, CharacterTrophy, Contour
 from bot.services.errors import NotFoundError, ServiceError
-from bot.services import art_storage_service
+from bot.services import art_storage_service, book_slot_service
 
 
 @dataclass(frozen=True)
@@ -50,8 +51,11 @@ async def export_character_profile(
     ownerships = await cards_crud.list_character_ownerships(session, character_id)
     contours = await contours_crud.list_for_character(session, character_id)
     arts = await arts_crud.list_for_character(session, character_id)
+    trophies = await trophies_crud.list_for_character(session, character_id)
+    slots = book_slot_service.calculate_usage(character, ownerships)
     sheets = [
-        _profile_sheet(character),
+        _profile_sheet(character, slots),
+        _trophies_sheet(character, trophies),
         _arts_sheet(character, arts),
         _contours_sheet(character, contours),
         *_character_card_sheets(character.name, ownerships),
@@ -67,7 +71,7 @@ async def export_registry(session: AsyncSession) -> SpreadsheetExport:
     cards = await cards_crud.list_cards(
         session,
         limit=100_000,
-        card_types=(CardType.SPECIAL, CardType.SPELL, CardType.CONTOUR),
+        card_types=(CardType.SPECIAL, CardType.SPELL, CardType.CONTOUR, CardType.GM),
     )
     sheets = [
         _registry_sheet(cards, card_type, title)
@@ -75,6 +79,7 @@ async def export_registry(session: AsyncSession) -> SpreadsheetExport:
             (CardType.SPECIAL, "Особые слоты"),
             (CardType.SPELL, "Заклинания"),
             (CardType.CONTOUR, "Контурные"),
+            (CardType.GM, "ГеймМастерские"),
         )
     ]
     filename = f"cards_registry_{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
@@ -84,18 +89,24 @@ async def export_registry(session: AsyncSession) -> SpreadsheetExport:
 def _character_card_sheets(
     character_name: str, ownerships: list[CardOwnership]
 ) -> list[dict[str, object]]:
+    locations = _ownership_locations(ownerships)
     return [
-        _character_sheet(character_name, ownerships, card_type, title)
+        _character_sheet(character_name, ownerships, card_type, title, locations)
         for card_type, title in (
             (CardType.SPECIAL, "Особые слоты"),
             (CardType.SPELL, "Заклинания"),
             (CardType.CONTOUR, "Контурные"),
             (CardType.ORDINARY, "Обычные"),
+            (CardType.GM, "ГеймМастерские"),
         )
     ]
 
 
-def _profile_sheet(character: Character) -> dict[str, object]:
+def _profile_sheet(character: Character, slots=None) -> dict[str, object]:
+    special_used = getattr(slots, "special_used", 0)
+    special_limit = getattr(slots, "special_limit", 100)
+    free_used = getattr(slots, "free_used", 0)
+    free_limit = getattr(slots, "free_limit", character.free_slot_limit or 10)
     rows = [
         ["Основное", "ID анкеты в БД", character.id],
         ["Основное", "Владелец VK", f"https://vk.ru/id{character.vk_id}"],
@@ -115,6 +126,8 @@ def _profile_sheet(character: Character) -> dict[str, object]:
         ["Прогресс", "Общий рейтинг", character.overall_rating.value],
         ["Прогресс", "Шакеи", character.shakei_balance],
         ["Прогресс", "Лимит Контуров", character.contour_limit],
+        ["Книга", "Особые слоты", f"{special_used}/{special_limit}"],
+        ["Книга", "Свободные слоты", f"{free_used}/{free_limit}"],
         ["Служебное", "Статус", "Подтверждена" if character.is_approved else "Не подтверждена"],
         ["Служебное", "Дата создания", _excel_datetime(character.created_at)],
         ["Дополнительно", "Дополнительно", character.additional],
@@ -127,6 +140,32 @@ def _profile_sheet(character: Character) -> dict[str, object]:
         "rows": rows,
         "dateColumns": [2],
         "widths": [18, 25, 80],
+    }
+
+
+def _trophies_sheet(
+    character: Character, trophies: list[CharacterTrophy]
+) -> dict[str, object]:
+    return {
+        "name": "Трофеи",
+        "title": f"Трофеи персонажа «{character.name}»",
+        "subtitle": f"Всего постоянных трофеев: {len(trophies)}",
+        "headers": ["ID трофея", "Ранг", "Название", "Описание", "Награда", "Выдал VK", "Дата"],
+        "rows": [
+            [
+                trophy.id,
+                trophy.rank.value,
+                trophy.name,
+                trophy.description,
+                trophy.reward,
+                f"https://vk.ru/id{trophy.awarded_by}",
+                _excel_datetime(trophy.created_at),
+            ]
+            for trophy in trophies
+        ],
+        "emptyText": "Трофеев у персонажа пока нет",
+        "dateColumns": [6],
+        "widths": [12, 16, 28, 48, 36, 28, 20],
     }
 
 
@@ -240,7 +279,9 @@ def _character_sheet(
     ownerships: list[CardOwnership],
     card_type: CardType,
     title: str,
+    locations: dict[int, str] | None = None,
 ) -> dict[str, object]:
+    locations = locations or _ownership_locations(ownerships)
     selected = [item for item in ownerships if item.display_type is card_type]
     totals: dict[tuple[str, object], list[int]] = {}
     for item in selected:
@@ -263,7 +304,7 @@ def _character_sheet(
         "Описание",
         "Способ использования",
         "Дата получения",
-        "Статус",
+        "Расположение в Книге",
     ]
     rows = []
     for ownership in selected:
@@ -275,11 +316,7 @@ def _character_sheet(
                 if card.card_type is CardType.SPECIAL
                 else card.registry_number if card.registry_number is not None else ""
             )
-        status = (
-            f"Связана: Контур #{ownership.contour_component.contour_id}"
-            if ownership.contour_component is not None
-            else "Свободна"
-        )
+        status = locations[ownership.id]
         total, free, bound = totals[_ownership_group_key(ownership)]
         rows.append(
             [
@@ -306,6 +343,27 @@ def _character_sheet(
         "dateColumns": [10],
         "widths": [18, 14, 24, 22, 10, 18, 12, 12, 42, 42, 20, 22],
     }
+
+
+def _ownership_locations(ownerships: list[CardOwnership]) -> dict[int, str]:
+    locations: dict[int, str] = {}
+    first_special: set[int] = set()
+    free: list[CardOwnership] = []
+    for ownership in sorted(ownerships, key=lambda item: (item.obtained_at, item.id)):
+        if ownership.contour_component is not None:
+            locations[ownership.id] = f"Контур #{ownership.contour_component.contour_id}"
+        elif (
+            ownership.card is not None
+            and ownership.card.card_type is CardType.SPECIAL
+            and ownership.card_id not in first_special
+        ):
+            first_special.add(ownership.card_id)
+            locations[ownership.id] = f"Особый слот #{ownership.card.number}"
+        else:
+            free.append(ownership)
+    for index, ownership in enumerate(free, start=1):
+        locations[ownership.id] = f"Свободный слот #{index}"
+    return locations
 
 
 def _ownership_group_key(ownership: CardOwnership) -> tuple[str, object]:

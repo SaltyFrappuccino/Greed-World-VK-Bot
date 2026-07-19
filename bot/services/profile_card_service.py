@@ -10,8 +10,9 @@ from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
 from bot.database.crud import profile_cards as profile_cards_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.database.models import CardType, CharacterProfileCard
-from bot.services import art_storage_service, profile_card_storage_service
+from bot.services import art_storage_service, book_slot_service, profile_card_storage_service
 from bot.services.errors import NotFoundError
 from bot.services.profile_card_renderer import (
     RENDER_VERSION,
@@ -37,7 +38,9 @@ async def get_or_create(
     ownerships = await cards_crud.list_character_ownerships(session, character_id)
     contours = await contours_crud.list_for_character(session, character_id)
     primary_art = await arts_crud.get_primary(session, character_id)
-    signature = _signature(character, ownerships, contours, primary_art)
+    trophies = await trophies_crud.list_for_character(session, character_id)
+    slots = book_slot_service.calculate_usage(character, ownerships)
+    signature = _signature(character, ownerships, contours, trophies, primary_art)
     input_hash = hashlib.sha256(
         json.dumps(signature, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -61,7 +64,7 @@ async def get_or_create(
         if primary_art is not None
         else None
     )
-    render_data = _render_data(character, ownerships, contours)
+    render_data = _render_data(character, ownerships, contours, trophies, slots)
     png = await asyncio.to_thread(render_profile_card, render_data, art_bytes)
     storage_key, file_size = profile_card_storage_service.save_png(
         png,
@@ -111,7 +114,7 @@ async def queue_character_file_for_delete(
         )
 
 
-def _render_data(character, ownerships, contours) -> ProfileCardData:
+def _render_data(character, ownerships, contours, trophies, slots) -> ProfileCardData:
     counts = {card_type.value: 0 for card_type in CardType}
     for ownership in ownerships:
         counts[ownership.display_type.value] += 1
@@ -134,10 +137,13 @@ def _render_data(character, ownerships, contours) -> ProfileCardData:
         card_counts=counts,
         contours_used=len(contours),
         contour_limit=character.contour_limit,
+        free_slots_used=slots.free_used,
+        free_slot_limit=slots.free_limit,
+        trophy_ranks=[trophy.rank.name for trophy in trophies],
     )
 
 
-def _signature(character, ownerships, contours, primary_art) -> dict[str, object]:
+def _signature(character, ownerships, contours, trophies, primary_art) -> dict[str, object]:
     return {
         "renderer_version": RENDER_VERSION,
         "character": {
@@ -168,6 +174,13 @@ def _signature(character, ownerships, contours, primary_art) -> dict[str, object
             }
             | {"components": [item.card_ownership_id for item in contour.components]}
             for contour in contours
+        ],
+        "trophies": [
+            {
+                column.name: _json_value(getattr(trophy, column.name))
+                for column in trophy.__table__.columns
+            }
+            for trophy in trophies
         ],
     }
 

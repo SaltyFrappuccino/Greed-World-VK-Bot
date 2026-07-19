@@ -39,27 +39,14 @@ async def get_by_number(session: AsyncSession, number: int) -> Card | None:
 async def get_by_registry_number(session: AsyncSession, number: int) -> Card | None:
     return await session.scalar(
         select(Card).where(
-            Card.card_type.in_((CardType.SPELL, CardType.CONTOUR)),
             Card.registry_number == number,
         )
     )
 
 
 async def next_registry_number(session: AsyncSession) -> int:
-    numbers = list(
-        await session.scalars(
-            select(Card.registry_number)
-            .where(Card.registry_number.is_not(None))
-            .order_by(Card.registry_number)
-        )
-    )
-    expected = 0
-    for number in numbers:
-        if number == expected:
-            expected += 1
-        elif number is not None and number > expected:
-            break
-    return expected
+    highest = await session.scalar(select(func.max(Card.registry_number)))
+    return max(100, int(highest or 99) + 1)
 
 
 async def search_by_name(session: AsyncSession, query: str, limit: int = 10) -> list[Card]:
@@ -334,6 +321,22 @@ async def list_character_ownerships(
             CardOwnership.ordinary_name,
             CardOwnership.id,
         )
+    )
+    return list(await session.scalars(stmt))
+
+
+async def list_character_ownerships_for_slots(
+    session: AsyncSession, character_id: int
+) -> list[CardOwnership]:
+    """Минимальная выборка для вместимости Книги без загрузки закрытых Контуров."""
+    stmt = (
+        select(CardOwnership)
+        .where(CardOwnership.character_id == character_id)
+        .options(
+            selectinload(CardOwnership.card),
+            selectinload(CardOwnership.contour_component),
+        )
+        .order_by(CardOwnership.id)
     )
     return list(await session.scalars(stmt))
 

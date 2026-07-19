@@ -19,6 +19,7 @@ DESTRUCTIVE_TOOLS = {
     "card_delete",
     "contour_disassemble",
     "character_art_delete",
+    "trophy_delete",
 }
 
 
@@ -187,6 +188,8 @@ def _action_preview(
         target = dict(plan.snapshot.get(f"contour:{arguments['contour_id']}", {}))
     elif "art_id" in arguments:
         target = dict(plan.snapshot.get(f"art:{arguments['art_id']}", {}))
+    elif "trophy_id" in arguments:
+        target = dict(plan.snapshot.get(f"trophy:{arguments['trophy_id']}", {}))
 
     fields = arguments.get("fields")
     if isinstance(fields, dict) and fields:
@@ -205,6 +208,7 @@ def _action_preview(
         "character_change_owner": ("vk_id", arguments.get("vk_id")),
         "contour_limit_set": ("contour_limit", arguments.get("value")),
         "contour_capacity_set": ("capacity", arguments.get("value")),
+        "free_slot_limit_set": ("free_slot_limit", arguments.get("value")),
     }.get(name)
     if simple_change:
         field, value = simple_change

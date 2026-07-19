@@ -70,8 +70,12 @@ async def require_single_by_vk_id(session: AsyncSession, vk_id: int) -> Characte
     if not characters:
         raise NotFoundError("У этого пользователя нет анкет.")
     if len(characters) > 1:
-        names = ", ".join(character.name for character in characters)
-        raise ValidationError(f"У пользователя несколько анкет: {names}. Укажите имя персонажа.")
+        names = ", ".join(
+            f"#{character.id} · {character.name}" for character in characters
+        )
+        raise ValidationError(
+            f"У пользователя несколько анкет: {names}. Укажите ID анкеты."
+        )
     return characters[0]
 
 

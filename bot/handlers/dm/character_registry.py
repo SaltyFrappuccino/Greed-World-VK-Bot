@@ -4,13 +4,14 @@ from vkbottle.dispatch.rules.base import PeerRule
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
+from bot.database.crud import trophies as trophies_crud
 from bot.database.engine import get_session
 from bot.keyboards.main_menu import (
     back_to_menu,
     character_registry_detail_menu,
     character_registry_menu,
 )
-from bot.services import character_service
+from bot.services import book_slot_service, character_service
 from bot.states import clear_state
 from bot.utils import formatters
 from bot.utils.messages import answer_long
@@ -53,10 +54,14 @@ async def show_character(
             await message.answer("Анкета не найдена.", keyboard=back_to_menu())
             return
         cards = await cards_crud.list_character_cards(session, character.id)
+        trophies = await trophies_crud.list_for_character(session, character.id)
+        slots = await book_slot_service.get_usage(session, character.id)
         primary_art = await arts_crud.get_primary(session, character.id)
         text = (
             f"Владелец: https://vk.ru/id{character.vk_id}\n\n"
-            + formatters.character_profile(character, cards)
+            + formatters.character_profile(
+                character, cards, trophies=trophies, book_slots=slots
+            )
         )
         can_view_contours = is_admin or character.vk_id == message.from_id
 

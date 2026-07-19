@@ -6,6 +6,7 @@ from bot.database.models import (
     CardOwnership,
     CardType,
     Character,
+    CharacterTrophy,
     Contour,
     ShakeiTransaction,
 )
@@ -40,7 +41,8 @@ def card_short(card: Card) -> str:
     slot = _card_game_number(card)
     lines = [
         f"🃏 {slot}{card.name} [{card.rarity.value}]",
-        f"ID карты в БД: #{card.id}",
+        f"Публичный ID карты: {card_public_id(card)}",
+        f"Внутренний ID БД: #{card.id}",
         f"Тип: {card.card_type.value}",
         f"Преобразования: {format_limit(card)}",
     ]
@@ -57,6 +59,7 @@ def card_full(card: Card, live_copies: int | None = None) -> str:
     slot = _card_game_number(card)
     lines = [
         f"🃏 {slot}{card.name} [{card.rarity.value}]",
+        f"Публичный ID карты: {card_public_id(card)}",
         f"Тип: {card.card_type.value}",
         f"Преобразования: {format_limit(card, live_copies)}",
     ]
@@ -67,7 +70,7 @@ def card_full(card: Card, live_copies: int | None = None) -> str:
         lines.append(f"\nОписание:\n{card.description}")
     if card.usage:
         lines.append(f"\nСпособ использования:\n{card.usage}")
-    lines.append(f"\nID карты в БД: #{card.id}")
+    lines.append(f"\nВнутренний ID БД: #{card.id}")
     return "\n".join(lines)
 
 
@@ -85,6 +88,8 @@ def character_profile(
     character: Character,
     cards: list[Card] | None = None,
     _private_contours: list[Contour] | None = None,
+    trophies: list[CharacterTrophy] | None = None,
+    book_slots: object | None = None,
 ) -> str:
     """Публичная часть анкеты; Контуры намеренно никогда не форматируются здесь."""
     header = "❖ Основное"
@@ -118,10 +123,22 @@ def character_profile(
         if cards:
             lines.append(
                 "Карты: "
-                + ", ".join(f"#{card.id} · {card.name}" for card in cards)
+                + ", ".join(f"{card_public_id(card)} · {card.name}" for card in cards)
             )
         else:
             lines.append("Карты: нет")
+
+    if book_slots is not None:
+        lines.extend(
+            (
+                f"Особые слоты: {book_slots.special_used}/{book_slots.special_limit}",
+                f"Свободные слоты: {book_slots.free_used}/{book_slots.free_limit}",
+            )
+        )
+
+    if trophies is not None:
+        lines.append("\n🏆 Трофеи")
+        lines.append(format_trophies(trophies, compact=True))
 
     if character.additional:
         lines.append(f"\n❦ Дополнительно\n{_truncate(character.additional, 900)}")
@@ -165,9 +182,18 @@ def format_contour(contour: Contour) -> str:
     return "\n".join(lines)
 
 
-def character_card_holdings(ownerships: list[CardOwnership]) -> str:
+def character_card_holdings(
+    ownerships: list[CardOwnership], book_slots: object | None = None
+) -> str:
+    slot_header = ""
+    if book_slots is not None:
+        slot_header = (
+            f"Особые слоты: {book_slots.special_used}/{book_slots.special_limit}\n"
+            f"Свободные слоты: {book_slots.free_used}/{book_slots.free_limit} "
+            f"(осталось {book_slots.free_remaining})\n\n"
+        )
     if not ownerships:
-        return "Карт пока нет."
+        return slot_header + "Карт пока нет."
     grouped: dict[tuple[CardType, int | str], list[CardOwnership]] = defaultdict(list)
     for ownership in ownerships:
         key: int | str = (
@@ -196,7 +222,7 @@ def character_card_holdings(ownerships: list[CardOwnership]) -> str:
                 f"свободно {len(items) - bound}, связано {bound}"
             )
         sections.append(f"{title}:\n" + ("\n".join(lines) if lines else "—"))
-    return "\n\n".join(sections)
+    return slot_header + "\n\n".join(sections)
 
 
 def card_owner_holdings(ownerships: list[CardOwnership]) -> str:
@@ -228,6 +254,32 @@ def transaction_line(transaction: ShakeiTransaction, character_id: int) -> str:
     return f"{date} {sign}{transaction.amount}{reason}"
 
 
+def format_trophies(
+    trophies: list[CharacterTrophy], *, compact: bool = False
+) -> str:
+    if not trophies:
+        return "Трофеев пока нет."
+    icons = {"BRONZE": "🥉", "SILVER": "🥈", "GOLD": "🥇"}
+    if compact:
+        return "\n".join(
+            f"{icons[trophy.rank.name]} {trophy.name} — {trophy.rank.value}"
+            for trophy in trophies
+        )
+    blocks = []
+    for trophy in trophies:
+        lines = [
+            f"{icons[trophy.rank.name]} {trophy.name}",
+            f"Ранг: {trophy.rank.value}",
+            f"ID трофея: #{trophy.id}",
+        ]
+        if trophy.description:
+            lines.append(f"Описание: {trophy.description}")
+        if trophy.reward:
+            lines.append(f"Награда: {trophy.reward}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -237,9 +289,17 @@ def _truncate(text: str, limit: int) -> str:
 def _card_game_number(card: Card) -> str:
     if card.card_type is CardType.SPECIAL and card.number is not None:
         return f"Особый слот №{card.number} · "
-    if card.card_type in (CardType.SPELL, CardType.CONTOUR) and card.registry_number is not None:
-        return f"Реестр №{card.registry_number} · "
+    if card.registry_number is not None:
+        return f"ID #{card.registry_number} · "
     return ""
+
+
+def card_public_id(card: Card) -> str:
+    if card.card_type is CardType.SPECIAL and card.number is not None:
+        return f"#{card.number}"
+    if card.registry_number is not None:
+        return f"#{card.registry_number}"
+    return "без публичного ID"
 
 
 def _ownership_label(ownership: CardOwnership) -> str:

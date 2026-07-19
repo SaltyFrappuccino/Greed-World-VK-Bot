@@ -60,14 +60,14 @@ def admin_character_cards_menu(character_id: int) -> str:
     keyboard.row()
     keyboard.add(
         Text(
-            "Выдать Закл./Конт.",
+            "Выдать реестровую",
             payload={"cmd": "admin_character_registry_grant", "id": character_id},
         ),
         color=KeyboardButtonColor.POSITIVE,
     )
     keyboard.add(
         Text(
-            "Забрать Закл./Конт.",
+            "Забрать реестровую",
             payload={"cmd": "admin_character_registry_revoke", "id": character_id},
         ),
         color=KeyboardButtonColor.NEGATIVE,
