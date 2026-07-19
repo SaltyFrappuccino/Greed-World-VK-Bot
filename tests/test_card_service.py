@@ -1,8 +1,9 @@
 import pytest
+from sqlalchemy import select
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
-from bot.database.models import CardType, Rarity
+from bot.database.models import CardType, CardUsage, Rarity
 from bot.services import card_service
 from bot.services.errors import TransformLimitReached, ValidationError
 
@@ -196,3 +197,111 @@ async def test_special_card_cannot_lose_slot_number(session):
 
     with pytest.raises(ValidationError, match="должна иметь номер"):
         await card_service.update_card(session, card.id, number=None)
+
+
+@pytest.mark.asyncio
+async def test_registered_copies_can_be_granted_and_partially_revoked(session):
+    character = await characters_crud.create(session, vk_id=1, name="Ава")
+    card = await card_service.create_card(
+        session,
+        name="Искры",
+        card_type=CardType.SPELL,
+        kind="Заклинание",
+        rarity=Rarity.H,
+        admin_vk_id=99,
+    )
+
+    granted = await card_service.grant_card_copies(
+        session, card.id, character.id, quantity=5
+    )
+    revoked = await card_service.revoke_card_copies(
+        session, card.id, character.id, quantity=2
+    )
+
+    assert len(granted) == 5
+    assert len(revoked) == 2
+    assert await cards_crud.count_owners(session, card.id) == 3
+    assert card.copies_count == 3
+
+
+@pytest.mark.asyncio
+async def test_ordinary_copies_can_be_partially_revoked(session):
+    character = await characters_crud.create(session, vk_id=1, name="Ава")
+    await card_service.grant_ordinary_cards(
+        session,
+        character_id=character.id,
+        name="Яблоко",
+        kind="Еда",
+        rarity=Rarity.H,
+        quantity=4,
+    )
+
+    await card_service.revoke_ordinary_cards(
+        session, character_id=character.id, name="Яблоко", quantity=2
+    )
+    ownerships = await cards_crud.list_character_ownerships(session, character.id)
+
+    assert [item.display_name for item in ownerships] == ["Яблоко", "Яблоко"]
+
+
+@pytest.mark.asyncio
+async def test_consumption_removes_exact_quantity_and_writes_audit(session):
+    character = await characters_crud.create(session, vk_id=101, name="Ава")
+    card = await card_service.create_card(
+        session,
+        name="Перенос",
+        card_type=CardType.SPELL,
+        kind="Заклинание",
+        rarity=Rarity.H,
+        admin_vk_id=99,
+    )
+    await card_service.grant_card_copies(
+        session, card.id, character.id, quantity=3
+    )
+
+    result = await card_service.consume_card(
+        session,
+        character_id=character.id,
+        used_by_vk_id=101,
+        name="Перенос",
+        quantity=2,
+        target_vk_id=202,
+        peer_id=2_000_000_001,
+        conversation_message_id=77,
+    )
+    usage = await session.scalar(select(CardUsage))
+
+    assert result.quantity == 2
+    assert result.remaining_free == 1
+    assert await cards_crud.count_owners(session, card.id) == 1
+    assert usage is not None
+    assert usage.id == result.usage_id
+    assert len(usage.ownership_ids) == 2
+    assert usage.target_vk_id == 202
+
+
+@pytest.mark.asyncio
+async def test_consumption_is_atomic_when_quantity_is_insufficient(session):
+    character = await characters_crud.create(session, vk_id=101, name="Ава")
+    await card_service.grant_ordinary_cards(
+        session,
+        character_id=character.id,
+        name="Яблоко",
+        kind="Еда",
+        rarity=Rarity.H,
+        quantity=2,
+    )
+
+    with pytest.raises(ValidationError, match="только 2"):
+        await card_service.consume_card(
+            session,
+            character_id=character.id,
+            used_by_vk_id=101,
+            name="Яблоко",
+            quantity=3,
+            target_vk_id=202,
+            peer_id=2_000_000_001,
+            conversation_message_id=77,
+        )
+
+    assert len(await cards_crud.list_character_ownerships(session, character.id)) == 2

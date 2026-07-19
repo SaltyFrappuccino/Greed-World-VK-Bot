@@ -19,26 +19,38 @@ labeler.vbml_ignore_case = True
 @labeler.message(text="?выдать")
 async def grant_card_hint(message: Message, **_: object) -> None:
     await message.answer(
-        "Формат: ?выдать <ID анкеты> <ID карты>\nПример: ?выдать 12 7",
+        "Формат: ?выдать <ID анкеты> <ID карты> [количество]\n"
+        "Пример: ?выдать 12 7 3",
         keyboard=back_to_admin_cards(),
     )
 
 
-@labeler.message(text="?выдать <character_id> <card_id>")
+@labeler.message(text=[
+    "?выдать <character_id> <card_id>",
+    "?выдать <character_id> <card_id> <quantity>",
+])
 async def grant_card(
-    message: Message, character_id: str, card_id: str, **_: object
+    message: Message,
+    character_id: str,
+    card_id: str,
+    quantity: str = "1",
+    **_: object,
 ) -> None:
     try:
         parsed_character_id = parse_positive_int(
             character_id, field="ID анкеты"
         )
         parsed_card_id = parse_positive_int(card_id, field="ID карты")
+        parsed_quantity = parse_positive_int(quantity, field="Количество карт")
         async with get_session() as session:
             card, character = await _get_card_and_character(
                 session, parsed_card_id, parsed_character_id
             )
-            await card_service.grant_card(
-                session, parsed_card_id, parsed_character_id
+            await card_service.grant_card_copies(
+                session,
+                parsed_card_id,
+                parsed_character_id,
+                quantity=parsed_quantity,
             )
             live_copies = await cards_crud.count_owners(session, parsed_card_id)
             limit_text = formatters.format_limit(card, live_copies)
@@ -48,7 +60,8 @@ async def grant_card(
 
     await clear_state(message.peer_id)
     await message.answer(
-        f"Карта #{card.id} · «{card.name}» выдана персонажу "
+        f"Карта #{card.id} · «{card.name}» выдана в количестве "
+        f"{parsed_quantity} персонажу "
         f"#{character.id} · {character.name}.\nПреобразования: {limit_text}",
         keyboard=back_to_admin_cards(),
     )
@@ -57,26 +70,38 @@ async def grant_card(
 @labeler.message(text="?забрать")
 async def revoke_card_hint(message: Message, **_: object) -> None:
     await message.answer(
-        "Формат: ?забрать <ID анкеты> <ID карты>\nПример: ?забрать 12 7",
+        "Формат: ?забрать <ID анкеты> <ID карты> [количество]\n"
+        "Пример: ?забрать 12 7 2",
         keyboard=back_to_admin_cards(),
     )
 
 
-@labeler.message(text="?забрать <character_id> <card_id>")
+@labeler.message(text=[
+    "?забрать <character_id> <card_id>",
+    "?забрать <character_id> <card_id> <quantity>",
+])
 async def revoke_card(
-    message: Message, character_id: str, card_id: str, **_: object
+    message: Message,
+    character_id: str,
+    card_id: str,
+    quantity: str = "1",
+    **_: object,
 ) -> None:
     try:
         parsed_character_id = parse_positive_int(
             character_id, field="ID анкеты"
         )
         parsed_card_id = parse_positive_int(card_id, field="ID карты")
+        parsed_quantity = parse_positive_int(quantity, field="Количество карт")
         async with get_session() as session:
             card, character = await _get_card_and_character(
                 session, parsed_card_id, parsed_character_id
             )
-            await card_service.revoke_card(
-                session, parsed_card_id, parsed_character_id
+            await card_service.revoke_card_copies(
+                session,
+                parsed_card_id,
+                parsed_character_id,
+                quantity=parsed_quantity,
             )
     except ServiceError as error:
         await message.answer(str(error), keyboard=back_to_admin_cards())
@@ -84,7 +109,8 @@ async def revoke_card(
 
     await clear_state(message.peer_id)
     await message.answer(
-        f"Карта #{card.id} · «{card.name}» забрана у персонажа "
+        f"Карта #{card.id} · «{card.name}» забрана в количестве "
+        f"{parsed_quantity} у персонажа "
         f"#{character.id} · {character.name}.",
         keyboard=back_to_admin_cards(),
     )

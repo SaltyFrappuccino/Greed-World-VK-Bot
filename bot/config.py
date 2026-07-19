@@ -43,13 +43,26 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./zhadny_mir.db"
 
+    character_art_storage_dir: str = "storage/character_art"
+    character_art_max_file_bytes: int = 20 * 1024 * 1024
+    character_art_max_total_bytes: int = 4 * 1024 * 1024 * 1024
+    character_art_max_per_character: int = 50
+    profile_card_storage_dir: str = "storage/profile_cards"
+    profile_card_font_regular: str | None = None
+    profile_card_font_bold: str | None = None
+
     log_level: str = "INFO"
+    log_file: str = "logs/zhadny_mir.log"
+    log_max_bytes: int = 5_242_880
+    log_backup_count: int = 5
 
     dslab_api_key: str | None = None
     dslab_base_url: str = "https://api.dslab.tech/v1"
     dslab_model: str = "deepseek-v4-flash"
     dslab_vision_model: str = "gemini-2.5-flash-lite"
     dslab_max_tokens: int = 4000
+    dslab_agent_max_tokens: int = 8000
+    dslab_agent_timeout_seconds: float = 180.0
 
     @field_validator("admin_vk_ids", mode="before")
     @classmethod
@@ -70,6 +83,20 @@ class Settings(BaseSettings):
         if "+" in scheme:
             return database_url
         return f"{_ASYNC_DRIVERS.get(scheme, scheme)}://{rest}"
+
+    @property
+    def character_art_storage_path(self) -> Path:
+        path = Path(self.character_art_storage_dir)
+        if not path.is_absolute():
+            path = _PROJECT_ROOT / path
+        return path.resolve()
+
+    @property
+    def profile_card_storage_path(self) -> Path:
+        path = Path(self.profile_card_storage_dir)
+        if not path.is_absolute():
+            path = _PROJECT_ROOT / path
+        return path.resolve()
 
     def is_admin(self, vk_id: int) -> bool:
         return vk_id in self.admin_vk_ids

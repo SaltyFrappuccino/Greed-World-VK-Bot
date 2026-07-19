@@ -11,7 +11,9 @@ from sqlalchemy.sql.elements import ColumnElement
 from bot.database.models import (
     Card,
     CardOwnership,
+    CardUsage,
     Character,
+    CharacterArt,
     Contour,
     ContourComponent,
     ShakeiTransaction,
@@ -28,8 +30,10 @@ MAX_RESULT_LENGTH = 9_000
 
 QUERY_ENTITIES = {
     "characters": Character,
+    "character_arts": CharacterArt,
     "cards": Card,
     "card_ownerships": CardOwnership,
+    "card_usages": CardUsage,
     "contours": Contour,
     "contour_components": ContourComponent,
     "shakei_transactions": ShakeiTransaction,

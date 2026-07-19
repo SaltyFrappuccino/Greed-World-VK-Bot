@@ -140,10 +140,19 @@ async def change_owner(
 
 
 async def delete_character(session: AsyncSession, character_id: int) -> str:
+    from bot.services import character_art_service
+    from bot.services import profile_card_service
+
     character = await characters_crud.get_by_id_for_update(session, character_id)
     if character is None:
         raise NotFoundError("Анкета не найдена.")
     name = character.name
+    await character_art_service.queue_character_files_for_delete(
+        session, character_id
+    )
+    await profile_card_service.queue_character_file_for_delete(
+        session, character_id
+    )
     await characters_crud.delete(session, character)
     return name
 

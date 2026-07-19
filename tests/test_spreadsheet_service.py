@@ -8,12 +8,14 @@ from bot.database.models import (
     CardOwnership,
     CardType,
     Character,
+    CharacterArt,
     Contour,
     ContourComponent,
     Rarity,
 )
 from bot.services.spreadsheet_service import (
     _build_sync,
+    _arts_sheet,
     _character_sheet,
     _contours_sheet,
     _profile_sheet,
@@ -37,9 +39,10 @@ def test_character_export_has_four_category_friendly_fields():
     sheet = _character_sheet("Ава", [ordinary], CardType.ORDINARY, "Обычные")
 
     assert sheet["name"] == "Обычные"
-    assert sheet["rows"][0][0] == ""
-    assert sheet["rows"][0][1:4] == ["Верёвка", "Инструмент", "H"]
-    assert sheet["dateColumns"] == [6]
+    assert sheet["rows"][0][1] == ""
+    assert sheet["rows"][0][2:5] == ["Верёвка", "Инструмент", "H"]
+    assert sheet["rows"][0][5:8] == [1, 1, 0]
+    assert sheet["dateColumns"] == [10]
 
 
 def test_registry_export_uses_correct_game_number_and_vk_link():
@@ -122,6 +125,41 @@ def test_full_profile_export_contains_all_sections_and_contour_components():
 
 def test_character_filename_part_keeps_name_and_removes_forbidden_characters():
     assert _safe_filename_part("  Ава / Искра?  ") == "Ава___Искра"
+
+
+def test_character_art_sheet_contains_metadata_and_preview(monkeypatch):
+    buffer = BytesIO()
+    from PIL import Image
+
+    Image.new("RGB", (16, 12), "green").save(buffer, format="JPEG")
+    monkeypatch.setattr(
+        "bot.services.spreadsheet_service.art_storage_service.thumbnail_bytes",
+        lambda _key: buffer.getvalue(),
+    )
+    character = Character(id=7, vk_id=100, name="Ава")
+    art = CharacterArt(
+        id=3,
+        character_id=7,
+        storage_key="characters/7/a.jpg",
+        sha256="a" * 64,
+        mime_type="image/jpeg",
+        file_size=1234,
+        width=1600,
+        height=1200,
+        caption="Портрет",
+        is_primary=True,
+        created_by=500,
+        created_at=datetime(2026, 7, 19, 12, 0),
+    )
+    definition = _arts_sheet(character, [art])
+    export = _build_sync("arts.xlsx", [definition])
+    workbook = load_workbook(BytesIO(export.data))
+    sheet = workbook["Арты"]
+
+    assert sheet["A4"].value == 3
+    assert sheet["B4"].value == "Да"
+    assert sheet["C4"].value == "Портрет"
+    assert len(sheet._images) == 1
 
 
 def test_xlsx_is_built_with_openpyxl_tables_dates_and_freeze_panes():

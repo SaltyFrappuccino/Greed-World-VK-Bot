@@ -9,7 +9,7 @@ from bot.keyboards.admin_menu import (
 )
 from bot.keyboards.main_menu import cancel
 from bot.middlewares.auth import AdminRule
-from bot.services import ai_service, character_service
+from bot.services import ai_service, character_art_service, character_service
 from bot.services.errors import ServiceError, ValidationError
 from bot.services.vk_service import resolve_user_id
 from bot.states import AdminAIState, clear_state, state_dispenser
@@ -86,6 +86,7 @@ async def generate_character(message: Message, **_: object) -> None:
         AdminAIState.CHARACTER_CONFIRM,
         owner_vk_id=state.payload["owner_vk_id"],
         draft=draft.model_dump(),
+        image_urls=image_urls,
     )
     await answer_long(
         message,
@@ -110,6 +111,7 @@ async def save_character(message: Message, **_: object) -> None:
         draft = ai_service.CharacterDraft.model_validate(state.payload["draft"])
         fields = ai_service.character_fields(draft)
         name = str(fields.pop("name"))
+        fields["is_approved"] = True
         async with get_session() as session:
             character = await character_service.create_character(
                 session,
@@ -117,6 +119,16 @@ async def save_character(message: Message, **_: object) -> None:
                 name=name,
                 **fields,
             )
+            for index, source_url in enumerate(state.payload.get("image_urls", [])):
+                await character_art_service.add_from_vk(
+                    session,
+                    character_id=character.id,
+                    source_url=source_url,
+                    vk_attachment=None,
+                    caption="Основной арт" if index == 0 else f"Арт {index + 1}",
+                    admin_vk_id=message.from_id,
+                    make_primary=index == 0,
+                )
     except (ServiceError, ValueError) as error:
         await message.answer(str(error), keyboard=cancel())
         return

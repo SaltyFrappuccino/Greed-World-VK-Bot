@@ -1,0 +1,280 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.database.crud import cards as cards_crud
+from bot.database.crud import characters as characters_crud
+from bot.database.models import Card, CardType, Character, Rarity
+from bot.services import character_service
+from bot.services.card_template_service import CONTOUR_SUBTYPES
+from bot.services.errors import NotFoundError, ValidationError
+
+WRITE_TOOLS = {
+    "character_create", "character_update", "character_delete", "character_approve",
+    "character_set_stat", "character_set_rating", "character_change_owner",
+    "card_create", "card_create_and_grant", "card_update", "card_delete",
+    "card_grant", "card_revoke", "ordinary_card_grant", "ordinary_card_revoke",
+    "contour_create", "contour_update", "contour_disassemble", "contour_limit_set",
+    "contour_capacity_set", "contour_card_add", "contour_card_remove",
+    "contour_card_replace", "shakei_change",
+    "character_art_add", "character_art_set_primary",
+    "character_art_update_caption", "character_art_delete",
+}
+ACTION_FIELDS = {
+    "character_create": ({"vk_id", "name", "fields", "arts"}, {"vk_id", "name"}),
+    "character_update": ({"character_id", "fields"}, {"character_id", "fields"}),
+    "character_delete": ({"character_id"}, {"character_id"}),
+    "character_approve": ({"character_id"}, {"character_id"}),
+    "character_set_stat": ({"character_id", "stat", "value"}, {"character_id", "stat", "value"}),
+    "character_set_rating": ({"character_id", "rating"}, {"character_id", "rating"}),
+    "character_change_owner": ({"character_id", "vk_id"}, {"character_id", "vk_id"}),
+    "card_create": ({"name", "card_type", "kind", "rarity", "number", "description", "usage", "transform_limit"}, {"name", "card_type", "kind", "rarity"}),
+    "card_create_and_grant": ({"character_id", "name", "card_type", "kind", "rarity", "number", "description", "usage", "transform_limit", "quantity"}, {"character_id", "name", "card_type", "kind", "rarity"}),
+    "card_update": ({"card_id", "fields"}, {"card_id", "fields"}),
+    "card_delete": ({"card_id"}, {"card_id"}),
+    "card_grant": ({"character_id", "card_id", "quantity"}, {"character_id", "card_id"}),
+    "card_revoke": ({"character_id", "card_id", "quantity"}, {"character_id", "card_id"}),
+    "ordinary_card_grant": ({"character_id", "name", "kind", "rarity", "description", "usage", "quantity"}, {"character_id", "name", "kind", "rarity"}),
+    "ordinary_card_revoke": ({"character_id", "ownership_id", "name", "quantity"}, {"character_id"}),
+    "contour_create": ({"character_id", "ownership_ids", "name", "slot", "card_capacity", "fields"}, {"character_id", "ownership_ids", "name"}),
+    "contour_update": ({"contour_id", "fields"}, {"contour_id", "fields"}),
+    "contour_disassemble": ({"contour_id"}, {"contour_id"}),
+    "contour_limit_set": ({"character_id", "value"}, {"character_id", "value"}),
+    "contour_capacity_set": ({"contour_id", "value"}, {"contour_id", "value"}),
+    "contour_card_add": ({"contour_id", "ownership_id"}, {"contour_id", "ownership_id"}),
+    "contour_card_remove": ({"contour_id", "component_id"}, {"contour_id", "component_id"}),
+    "contour_card_replace": ({"contour_id", "component_id", "ownership_id"}, {"contour_id", "component_id", "ownership_id"}),
+    "shakei_change": ({"character_id", "delta"}, {"character_id", "delta"}),
+    "character_art_add": ({"character_id", "source_url", "caption", "make_primary"}, {"character_id", "source_url"}),
+    "character_art_set_primary": ({"art_id"}, {"art_id"}),
+    "character_art_update_caption": ({"art_id", "caption"}, {"art_id", "caption"}),
+    "character_art_delete": ({"art_id"}, {"art_id"}),
+}
+CHARACTER_CREATE_FIELDS = {
+    "age", "gender", "appearance", "personality", "biography", "skills", "additional",
+    "stress_resistance", "speech", "intuition", "spine", "will", "scent",
+    "overall_rating", "is_approved", "contour_limit",
+}
+CHARACTER_UPDATE_FIELDS = {
+    "name", "vk_id", "age", "gender", "appearance", "personality", "biography",
+    "skills", "additional",
+}
+CARD_UPDATE_FIELDS = {
+    "name", "kind", "rarity", "number", "description", "usage", "transform_limit",
+}
+
+async def _character(session: AsyncSession, character_id: int) -> Character:
+    item = await characters_crud.get_by_id(session, character_id)
+    if item is None:
+        raise NotFoundError(f"Анкета #{character_id} не найдена.")
+    return item
+
+
+async def _card(session: AsyncSession, card_id: int) -> Card:
+    item = await cards_crud.get_by_id(session, card_id)
+    if item is None:
+        raise NotFoundError(f"Карта #{card_id} не найдена.")
+    return item
+
+
+def _character_data(item: Character) -> dict[str, object]:
+    return {
+        "id": item.id, "vk_id": item.vk_id, "name": item.name, "age": item.age,
+        "gender": item.gender, "appearance": item.appearance, "personality": item.personality,
+        "biography": item.biography, "skills": item.skills, "additional": item.additional,
+        "stress_resistance": item.stress_resistance, "speech": item.speech,
+        "intuition": item.intuition, "spine": item.spine, "will": item.will, "scent": item.scent,
+        "rating": item.overall_rating.value, "shakei": item.shakei_balance,
+        "contour_limit": item.contour_limit, "approved": item.is_approved,
+    }
+
+
+def _card_data(item: Card) -> dict[str, object]:
+    return {
+        "id": item.id, "number": item.number, "registry_number": item.registry_number,
+        "name": item.name, "card_type": item.card_type.value, "kind": item.kind,
+        "rarity": item.rarity.value, "description": item.description, "usage": item.usage,
+        "transform_limit": item.transform_limit, "copies_count": item.copies_count,
+    }
+
+
+def _text(arguments: dict[str, object], key: str) -> str:
+    value = str(arguments.get(key, "")).strip()
+    if not value:
+        raise ValidationError(f"Инструменту не передано поле {key}.")
+    return value
+
+
+def _integer(arguments: dict[str, object], key: str) -> int:
+    try:
+        value = int(arguments[key])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValidationError(f"Поле {key} должно быть целым числом.") from error
+    if value <= 0:
+        raise ValidationError(f"Поле {key} должно быть больше нуля.")
+    return value
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as error:
+        raise ValidationError("Ожидалось целое число.") from error
+
+
+def _dict(arguments: dict[str, object], key: str, *, optional: bool = False) -> dict[str, object]:
+    value = arguments.get(key, {} if optional else None)
+    if not isinstance(value, dict):
+        raise ValidationError(f"Поле {key} должно быть объектом.")
+    return dict(value)
+
+
+def _rarity(value: object) -> Rarity:
+    try:
+        return Rarity(str(value).upper())
+    except ValueError as error:
+        raise ValidationError("Неизвестная редкость карты.") from error
+
+
+def _card_type(value: object) -> CardType:
+    text = str(value).strip()
+    for item in CardType:
+        if text.casefold() in {item.name.casefold(), item.value.casefold()}:
+            return item
+    raise ValidationError("Неизвестный тип карты.")
+
+
+def _normalize_card_fields(fields: dict[str, object]) -> dict[str, object]:
+    if "rarity" in fields:
+        fields["rarity"] = _rarity(fields["rarity"])
+    if "card_type" in fields:
+        raise ValidationError("Тип существующей карты менять нельзя.")
+    return fields
+
+
+def _normalize_character_create_fields(fields: dict[str, object]) -> dict[str, object]:
+    _reject_unknown_fields(fields, CHARACTER_CREATE_FIELDS, "новой анкеты")
+    if "overall_rating" in fields:
+        fields["overall_rating"] = _rarity(fields["overall_rating"])
+    return fields
+
+
+def _reject_unknown_fields(
+    fields: dict[str, object], allowed: set[str], target: str
+) -> None:
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValidationError(
+            f"AI попытался изменить запрещённые поля {target}: {', '.join(sorted(unknown))}."
+        )
+
+
+def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
+    allowed, required = ACTION_FIELDS[name]
+    unknown = set(arguments) - allowed
+    missing = required - set(arguments)
+    if unknown:
+        raise ValidationError(
+            f"Инструмент {name} получил запрещённые аргументы: {', '.join(sorted(unknown))}."
+        )
+    if missing:
+        raise ValidationError(
+            f"Инструмент {name} не получил обязательные аргументы: {', '.join(sorted(missing))}."
+        )
+    for key in (
+        "vk_id", "character_id", "card_id", "contour_id", "ownership_id",
+        "component_id", "art_id",
+    ):
+        if key in arguments and arguments[key] not in (None, ""):
+            _integer(arguments, key)
+    ownership_ids = arguments.get("ownership_ids")
+    if ownership_ids is not None:
+        if not isinstance(ownership_ids, list):
+            raise ValidationError("Поле ownership_ids должно быть списком числовых ID.")
+        for value in ownership_ids:
+            try:
+                if int(value) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError) as error:
+                raise ValidationError(
+                    "Каждый элемент ownership_ids должен быть положительным числовым ID."
+                ) from error
+    if name == "character_create" and "arts" in arguments:
+        arts = arguments["arts"]
+        if not isinstance(arts, list) or not arts:
+            raise ValidationError("Поле arts новой анкеты должно быть непустым списком.")
+        for art in arts:
+            if not isinstance(art, dict):
+                raise ValidationError("Каждый арт новой анкеты должен быть объектом.")
+            unknown_art_fields = set(art) - {"source_url", "caption", "make_primary"}
+            if unknown_art_fields:
+                raise ValidationError("Арт новой анкеты содержит неизвестные поля.")
+            _text(art, "source_url")
+            if len(str(art.get("caption", ""))) > 500:
+                raise ValidationError("Подпись арта не может быть длиннее 500 символов.")
+    if name == "character_create":
+        _normalize_character_create_fields(
+            _dict(arguments, "fields", optional=True)
+        )
+    if name == "character_update":
+        fields = _dict(arguments, "fields")
+        _reject_unknown_fields(fields, CHARACTER_UPDATE_FIELDS, "анкеты")
+        if "vk_id" in fields:
+            try:
+                if int(fields["vk_id"]) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError) as error:
+                raise ValidationError(
+                    "Поле vk_id владельца анкеты должно быть положительным числовым ID."
+                ) from error
+    if "quantity" in arguments:
+        quantity = _integer(arguments, "quantity")
+        if quantity > 999:
+            raise ValidationError("Количество карт за одну операцию не может быть больше 999.")
+    if "caption" in arguments and len(str(arguments["caption"])) > 500:
+        raise ValidationError("Подпись арта не может быть длиннее 500 символов.")
+    if name == "ordinary_card_revoke":
+        has_ownership = arguments.get("ownership_id") not in (None, "")
+        has_name = bool(str(arguments.get("name", "")).strip())
+        if has_ownership == has_name:
+            raise ValidationError(
+                "Для изъятия Обычной карты укажите либо ownership_id одной копии, "
+                "либо name и необязательное quantity."
+            )
+        if has_ownership and int(arguments.get("quantity", 1)) != 1:
+            raise ValidationError(
+                "При изъятии по ownership_id количество всегда равно 1; "
+                "для нескольких копий используйте name и quantity."
+            )
+    if name not in {"card_create", "card_create_and_grant"}:
+        return
+
+    card_type = _card_type(arguments["card_type"])
+    _rarity(arguments["rarity"])
+    kind = str(arguments["kind"]).strip()
+    if card_type is CardType.ORDINARY:
+        raise ValidationError(
+            "Обычная карта не создаётся в реестре: используй ordinary_card_grant."
+        )
+    if name == "card_create_and_grant" and card_type is CardType.GM:
+        raise ValidationError("Карту ГеймМастера нельзя выдавать персонажу.")
+
+    number = _optional_int(arguments.get("number"))
+    transform_limit = _optional_int(arguments.get("transform_limit"))
+    if card_type is CardType.SPECIAL:
+        if number is None:
+            raise ValidationError("Для Особой карты нужен номер слота от 0 до 99.")
+        if not 0 <= number <= 99:
+            raise ValidationError("Номер Особого слота должен быть от 0 до 99.")
+    elif number is not None:
+        raise ValidationError("Номер Особого слота допустим только для Особой карты.")
+    if card_type is not CardType.SPECIAL and transform_limit is not None:
+        raise ValidationError("Лимит преобразований допустим только для Особой карты.")
+    if transform_limit is not None and transform_limit < 1:
+        raise ValidationError("Лимит преобразований должен быть больше нуля.")
+    if card_type is CardType.CONTOUR and kind not in CONTOUR_SUBTYPES:
+        raise ValidationError(
+            "Контурной карте нужен системный подтип из списка форм или эффектов."
+        )
+    if card_type is CardType.SPELL and kind.casefold() != CardType.SPELL.value.casefold():
+        raise ValidationError("У Карты Заклинаний поле kind должно быть «Заклинание».")

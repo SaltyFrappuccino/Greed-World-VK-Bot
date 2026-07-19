@@ -6,6 +6,7 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.engine import get_session
 from bot.database.models import Character
@@ -20,6 +21,7 @@ from bot.states import clear_state
 from bot.utils import formatters
 from bot.utils.messages import answer_long
 from bot.utils.validators import parse_positive_int
+from bot.utils.photos import art_attachment
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
 labeler.vbml_ignore_case = True
@@ -187,8 +189,15 @@ async def _show_character(
     is_admin: bool,
 ) -> None:
     cards = await cards_crud.list_character_cards(session, character.id)
+    primary_art = await arts_crud.get_primary(session, character.id)
+    attachment = (
+        await art_attachment(message, primary_art)
+        if primary_art is not None
+        else None
+    )
     await answer_long(
         message,
         formatters.character_profile(character, cards),
         keyboard=profile_menu(character.id, is_admin=is_admin),
+        attachment=attachment,
     )

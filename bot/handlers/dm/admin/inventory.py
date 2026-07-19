@@ -10,7 +10,6 @@ from bot.keyboards.admin_menu import (
     back_to_admin_cards,
     back_to_admin_characters,
     card_owners_menu,
-    card_add_mode_menu,
 )
 from bot.keyboards.main_menu import cancel
 from bot.middlewares.auth import AdminRule
@@ -76,7 +75,11 @@ async def ask_card_recipient(message: Message, **_: object) -> None:
     await state_dispenser.set(
         message.peer_id, AdminCardState.GRANT_CHARACTER, card_id=card_id
     )
-    await message.answer("Введите ID анкеты получателя.", keyboard=cancel())
+    await message.answer(
+        "Введите ID анкеты получателя и количество копий. Например: 12 3. "
+        "Если количество не указано, будет выдана 1 копия.",
+        keyboard=cancel(),
+    )
 
 
 @labeler.message(payload_contains={"cmd": "admin_character_card_grant"})
@@ -91,7 +94,11 @@ async def ask_character_card(message: Message, **_: object) -> None:
         AdminCardState.CHARACTER_GRANT_CARD,
         character_id=character_id,
     )
-    await message.answer("Введите ID карты, которую нужно выдать.", keyboard=cancel())
+    await message.answer(
+        "Введите ID карты и количество копий. Например: 25 3. "
+        "По умолчанию — 1 копия.",
+        keyboard=cancel(),
+    )
 
 
 @labeler.message(payload_contains={"cmd": "admin_character_card_revoke"})
@@ -106,6 +113,11 @@ async def ask_revoke_card(message: Message, **_: object) -> None:
         AdminCardState.CHARACTER_REVOKE_CARD,
         character_id=character_id,
     )
+    await message.answer(
+        "Введите ID карты и количество списываемых свободных копий. "
+        "Например: 25 2. По умолчанию — 1 копия.",
+        keyboard=cancel(),
+    )
 
 
 @labeler.message(payload_contains={"cmd": "admin_character_special_grant"})
@@ -113,7 +125,7 @@ async def ask_special_grant(message: Message, **_: object) -> None:
     await _ask_numbered_change(
         message,
         AdminCardState.CHARACTER_GRANT_SPECIAL,
-        "Введите номер Особого слота от 0 до 99.",
+        "Введите номер Особого слота и количество. Например: 17 2.",
     )
 
 
@@ -122,7 +134,7 @@ async def ask_special_revoke(message: Message, **_: object) -> None:
     await _ask_numbered_change(
         message,
         AdminCardState.CHARACTER_REVOKE_SPECIAL,
-        "Введите номер Особого слота, который нужно забрать.",
+        "Введите номер Особого слота и количество свободных копий для списания.",
     )
 
 
@@ -131,7 +143,8 @@ async def ask_registry_grant(message: Message, **_: object) -> None:
     await _ask_numbered_change(
         message,
         AdminCardState.CHARACTER_GRANT_REGISTRY,
-        "Введите общий номер Заклинания или Контурной карты, начиная с 0.",
+        "Введите общий номер Заклинания/Контурной карты и количество. "
+        "Например: 4 3.",
     )
 
 
@@ -140,7 +153,8 @@ async def ask_registry_revoke(message: Message, **_: object) -> None:
     await _ask_numbered_change(
         message,
         AdminCardState.CHARACTER_REVOKE_REGISTRY,
-        "Введите общий номер Заклинания или Контурной карты, которую нужно забрать.",
+        "Введите общий номер Заклинания/Контурной карты и количество "
+        "списываемых свободных копий.",
     )
 
 
@@ -153,13 +167,13 @@ async def add_ordinary_card(message: Message, **_: object) -> None:
         return
     await state_dispenser.set(
         message.peer_id,
-        AdminCardState.ADD_MODE,
+        AdminCardState.ORDINARY_QUANTITY,
         card_type=CardType.ORDINARY.name,
         character_id=character_id,
     )
     await message.answer(
-        "Как добавить Обычную карту этому персонажу?",
-        keyboard=card_add_mode_menu(),
+        "Сколько одинаковых копий Обычной карты добавить?",
+        keyboard=cancel(),
     )
 
 
@@ -176,7 +190,8 @@ async def ask_ordinary_revoke(message: Message, **_: object) -> None:
         character_id=character_id,
     )
     await message.answer(
-        "Введите точное название Обычной карты. Будет забрана одна свободная копия.",
+        "Введите точное название Обычной карты и количество через «|». "
+        "Например: Яблоко | 3. По умолчанию — 1 копия.",
         keyboard=cancel(),
     )
 
@@ -184,10 +199,14 @@ async def ask_ordinary_revoke(message: Message, **_: object) -> None:
 @labeler.message(state=AdminCardState.GRANT_CHARACTER)
 async def give_selected_card(message: Message, **_: object) -> None:
     try:
-        character_id = parse_positive_int(message.text, field="ID анкеты")
+        character_id, quantity = _parse_id_and_quantity(
+            message.text, field="ID анкеты"
+        )
         card_id = message.state_peer.payload["card_id"]
         async with get_session() as session:
-            ownership = await card_service.grant_card(session, card_id, character_id)
+            ownerships = await card_service.grant_card_copies(
+                session, card_id, character_id, quantity=quantity
+            )
             card = await cards_crud.get_by_id(session, card_id)
             character = await characters_crud.get_by_id(session, character_id)
     except ServiceError as error:
@@ -195,8 +214,9 @@ async def give_selected_card(message: Message, **_: object) -> None:
         return
     await clear_state(message.peer_id)
     await message.answer(
-        f"Выдана копия #{ownership.id} карты #{card.id} · {card.name} персонажу "
-        f"#{character.id} · {character.name}.",
+        f"Выдано {len(ownerships)} коп. карты #{card.id} · {card.name} персонажу "
+        f"#{character.id} · {character.name}. ID копий: "
+        f"{', '.join('#' + str(item.id) for item in ownerships)}.",
         keyboard=card_owners_menu(card.id),
     )
 
@@ -235,9 +255,13 @@ async def revoke_registry_card(message: Message, **_: object) -> None:
 async def revoke_ordinary_card(message: Message, **_: object) -> None:
     character_id = message.state_peer.payload["character_id"]
     try:
+        name, quantity = _parse_name_and_quantity(message.text)
         async with get_session() as session:
-            await card_service.revoke_ordinary_card(
-                session, character_id=character_id, name=message.text
+            await card_service.revoke_ordinary_cards(
+                session,
+                character_id=character_id,
+                name=name,
+                quantity=quantity,
             )
             character = await characters_crud.get_by_id(session, character_id)
             ownerships = await cards_crud.list_character_ownerships(
@@ -249,7 +273,8 @@ async def revoke_ordinary_card(message: Message, **_: object) -> None:
         return
     await clear_state(message.peer_id)
     await message.answer(
-        f"Обычная карта забрана у #{character.id} · {character.name}.\n\n{text}",
+        f"Списано {quantity} коп. Обычной карты «{name}» у "
+        f"#{character.id} · {character.name}.\n\n{text}",
         keyboard=admin_character_cards_menu(character.id),
     )
 
@@ -271,13 +296,11 @@ async def _ask_numbered_change(
 async def _apply_numbered_card_change(
     message: Message, *, special: bool, revoke: bool
 ) -> None:
-    text_number = message.text.strip()
-    if not text_number.isdigit():
-        await message.answer("Номер должен быть целым числом от 0.", keyboard=cancel())
-        return
-    number = int(text_number)
     character_id = message.state_peer.payload["character_id"]
     try:
+        number, quantity = _parse_non_negative_id_and_quantity(
+            message.text, field="Номер карты"
+        )
         async with get_session() as session:
             card = (
                 await cards_crud.get_by_number(session, number)
@@ -291,9 +314,13 @@ async def _apply_numbered_card_change(
             if character is None:
                 raise ValidationError("Анкета не найдена.")
             if revoke:
-                await card_service.revoke_card(session, card.id, character_id)
+                await card_service.revoke_card_copies(
+                    session, card.id, character_id, quantity=quantity
+                )
             else:
-                await card_service.grant_card(session, card.id, character_id)
+                await card_service.grant_card_copies(
+                    session, card.id, character_id, quantity=quantity
+                )
             ownerships = await cards_crud.list_character_ownerships(
                 session, character_id
             )
@@ -302,16 +329,18 @@ async def _apply_numbered_card_change(
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    action = "забрана" if revoke else "выдана"
+    action = "списано" if revoke else "выдано"
     await message.answer(
-        f"Карта «{card.name}» {action}.\n\n{holdings}",
+        f"Карта «{card.name}»: {action} {quantity} коп.\n\n{holdings}",
         keyboard=admin_character_cards_menu(character.id),
     )
 
 
 async def _apply_character_card_change(message: Message, *, revoke: bool) -> None:
     try:
-        card_id = parse_positive_int(message.text, field="ID карты")
+        card_id, quantity = _parse_id_and_quantity(
+            message.text, field="ID карты"
+        )
         character_id = message.state_peer.payload["character_id"]
         async with get_session() as session:
             card = await cards_crud.get_by_id(session, card_id)
@@ -321,9 +350,13 @@ async def _apply_character_card_change(message: Message, *, revoke: bool) -> Non
             if character is None:
                 raise ValidationError("Анкета не найдена.")
             if revoke:
-                await card_service.revoke_card(session, card_id, character_id)
+                await card_service.revoke_card_copies(
+                    session, card_id, character_id, quantity=quantity
+                )
             else:
-                await card_service.grant_card(session, card_id, character_id)
+                await card_service.grant_card_copies(
+                    session, card_id, character_id, quantity=quantity
+                )
             ownerships = await cards_crud.list_character_ownerships(
                 session, character_id
             )
@@ -332,9 +365,9 @@ async def _apply_character_card_change(message: Message, *, revoke: bool) -> Non
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    action = "забрана" if revoke else "выдана"
+    action = "списано" if revoke else "выдано"
     await message.answer(
-        f"Карта #{card.id} · {card.name} {action}.\n\n{text}",
+        f"Карта #{card.id} · {card.name}: {action} {quantity} коп.\n\n{text}",
         keyboard=admin_character_cards_menu(character.id),
     )
 
@@ -342,3 +375,44 @@ async def _apply_character_card_change(message: Message, *, revoke: bool) -> Non
 def _payload_id(message: Message, field: str) -> int:
     payload = message.get_payload_json() or {}
     return parse_positive_int(str(payload.get("id", "")), field=field)
+
+
+def _parse_id_and_quantity(text: str, *, field: str) -> tuple[int, int]:
+    raw_id, quantity = _split_quantity(text)
+    return parse_positive_int(raw_id.removeprefix("#"), field=field), quantity
+
+
+def _parse_non_negative_id_and_quantity(
+    text: str, *, field: str
+) -> tuple[int, int]:
+    raw_id, quantity = _split_quantity(text)
+    if not raw_id.removeprefix("#").isdigit():
+        raise ValidationError(f"{field}: нужно целое число от 0.")
+    return int(raw_id.removeprefix("#")), quantity
+
+
+def _split_quantity(text: str) -> tuple[str, int]:
+    parts = text.strip().split()
+    if not parts or len(parts) > 2:
+        raise ValidationError("Укажите идентификатор и, при необходимости, количество.")
+    quantity = 1
+    if len(parts) == 2:
+        raw_quantity = parts[1].casefold()
+        quantity = parse_positive_int(
+            raw_quantity.removeprefix("x").removeprefix("х").removeprefix("×"),
+            field="Количество карт",
+        )
+    return parts[0], quantity
+
+
+def _parse_name_and_quantity(text: str) -> tuple[str, int]:
+    name, separator, raw_quantity = text.rpartition("|")
+    if not separator:
+        name = text.strip()
+        quantity = 1
+    else:
+        name = name.strip()
+        quantity = parse_positive_int(raw_quantity, field="Количество карт")
+    if not name:
+        raise ValidationError("Укажите точное название карты.")
+    return name, quantity

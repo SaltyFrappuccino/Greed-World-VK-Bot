@@ -69,7 +69,11 @@ async def save_character(message: Message, **_: object) -> None:
             fields = parse_character_template(message.text)
             name = str(fields.pop("name"))
             character = await character_service.create_character(
-                session, vk_id=owner_vk_id, name=name, **fields
+                session,
+                vk_id=owner_vk_id,
+                name=name,
+                is_approved=True,
+                **fields,
             )
         except ServiceError as error:
             await message.answer(str(error), keyboard=cancel())

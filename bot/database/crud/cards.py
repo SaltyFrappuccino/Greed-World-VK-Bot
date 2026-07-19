@@ -171,6 +171,17 @@ async def get_ownership_by_id(
 async def get_free_ownership(
     session: AsyncSession, card_id: int, character_id: int
 ) -> CardOwnership | None:
+    items = await list_free_ownerships(session, card_id, character_id, limit=1)
+    return items[0] if items else None
+
+
+async def list_free_ownerships(
+    session: AsyncSession,
+    card_id: int,
+    character_id: int,
+    *,
+    limit: int | None = None,
+) -> list[CardOwnership]:
     stmt = (
         select(CardOwnership)
         .outerjoin(
@@ -183,8 +194,11 @@ async def get_free_ownership(
             ContourComponent.id.is_(None),
         )
         .order_by(CardOwnership.id)
+        .with_for_update(of=CardOwnership)
     )
-    return await session.scalar(stmt)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(await session.scalars(stmt))
 
 
 async def add_ownership(session: AsyncSession, card_id: int, character_id: int) -> CardOwnership:
@@ -221,6 +235,17 @@ async def add_ordinary_ownership(
 async def get_free_ordinary_ownership(
     session: AsyncSession, character_id: int, name: str
 ) -> CardOwnership | None:
+    items = await list_free_ordinary_ownerships(session, character_id, name, limit=1)
+    return items[0] if items else None
+
+
+async def list_free_ordinary_ownerships(
+    session: AsyncSession,
+    character_id: int,
+    name: str,
+    *,
+    limit: int | None = None,
+) -> list[CardOwnership]:
     expected = name.strip().casefold()
     stmt = (
         select(CardOwnership)
@@ -234,16 +259,43 @@ async def get_free_ordinary_ownership(
             ContourComponent.id.is_(None),
         )
         .order_by(CardOwnership.id)
+        .with_for_update(of=CardOwnership)
     )
     ownerships = list(await session.scalars(stmt))
-    return next(
-        (
-            ownership
-            for ownership in ownerships
-            if (ownership.ordinary_name or "").casefold() == expected
-        ),
-        None,
+    matches = [
+        ownership
+        for ownership in ownerships
+        if (ownership.ordinary_name or "").casefold() == expected
+    ]
+    return matches if limit is None else matches[:limit]
+
+
+async def list_free_consumable_ownerships(
+    session: AsyncSession, character_id: int, name: str
+) -> list[CardOwnership]:
+    """Free Spell or Ordinary copies matching an exact display name."""
+    expected = name.strip().casefold()
+    stmt = (
+        select(CardOwnership)
+        .outerjoin(
+            ContourComponent,
+            ContourComponent.card_ownership_id == CardOwnership.id,
+        )
+        .outerjoin(Card, Card.id == CardOwnership.card_id)
+        .where(
+            CardOwnership.character_id == character_id,
+            ContourComponent.id.is_(None),
+            (
+                CardOwnership.card_id.is_(None)
+                | (Card.card_type == CardType.SPELL)
+            ),
+        )
+        .options(selectinload(CardOwnership.card))
+        .order_by(CardOwnership.id)
+        .with_for_update(of=CardOwnership)
     )
+    items = list(await session.scalars(stmt))
+    return [item for item in items if item.display_name.casefold() == expected]
 
 
 async def remove_ownership(session: AsyncSession, ownership: CardOwnership) -> None:

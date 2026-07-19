@@ -1,5 +1,6 @@
 from bot.handlers.dm.admin import (
     ai,
+    arts,
     assistant,
     cards,
     characters,
@@ -12,6 +13,7 @@ from bot.handlers.dm.admin import (
 
 labelers = [
     commands.labeler,
+    arts.labeler,
     assistant.labeler,
     contours.labeler,
     inventory.labeler,

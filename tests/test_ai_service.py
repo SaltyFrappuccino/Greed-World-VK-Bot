@@ -1,10 +1,13 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 from bot.config import get_settings
 from bot.services import ai_service
+from bot.services.admin_ai import llm as admin_ai_llm
+from bot.services.content_ai import client as content_ai_client
 
 
 class _FakeCompletions:
@@ -44,7 +47,7 @@ class _FakeClient:
 
 
 @pytest.mark.asyncio
-async def test_admin_assistant_uses_json_mode_without_native_tools(monkeypatch):
+async def test_admin_assistant_uses_json_mode_without_native_tools(monkeypatch, caplog):
     content = json.dumps(
         {
             "kind": "read_tools",
@@ -58,24 +61,58 @@ async def test_admin_assistant_uses_json_mode_without_native_tools(monkeypatch):
     completions = _FakeCompletions(content)
     monkeypatch.setenv("DSLAB_API_KEY", "test-key")
     monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("DSLAB_AGENT_MAX_TOKENS", "8000")
     monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+        admin_ai_llm, "AsyncOpenAI", lambda **_: _FakeClient(completions)
     )
     get_settings.cache_clear()
 
+    caplog.set_level(logging.INFO, logger="zhadny_mir.ai_agent.llm")
     turn = await ai_service.generate_admin_assistant_turn(
-        [{"role": "user", "content": "Покажи Аву"}]
+        [{"role": "user", "content": "Покажи Аву"}],
+        request_id="test-request",
+        round_number=1,
     )
 
     assert turn.kind == "read_tools"
     assert turn.tools[0].name == "find_character"
     assert "tools" not in completions.request
     assert completions.request["response_format"] == {"type": "json_object"}
+    assert completions.request["max_tokens"] == 8000
     system_prompt = completions.request["messages"][0]["content"]
     assert "H, G, F, E, D, C, B, A, S, SS" in system_prompt
-    assert "«эпическая», «легендарная»" in system_prompt
-    assert "Какому персонажу выдать карту?" in system_prompt
-    assert "не спрашивай, реестровая ли это карта" in system_prompt
+    assert "Уточняй минимально необходимое" in system_prompt
+    assert "Тип карты определяет способ хранения" in system_prompt
+    assert "Пример:" not in system_prompt
+    assert "request.start request_id=test-request round=1" in caplog.text
+    assert "request.done request_id=test-request round=1" in caplog.text
+    assert "parse.ok request_id=test-request round=1 kind=read_tools" in caplog.text
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_admin_assistant_repairs_invalid_model_json(monkeypatch):
+    completions = _SequenceCompletions(
+        [
+            '{"kind":"answer","message":"Готово","tools":"сломано"}',
+            '{"kind":"answer","message":"Готово","tools":[],"actions":[],"warnings":[]}',
+        ]
+    )
+    monkeypatch.setenv("DSLAB_API_KEY", "test-key")
+    monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
+    monkeypatch.setattr(
+        admin_ai_llm, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+    )
+    get_settings.cache_clear()
+
+    turn = await ai_service.generate_admin_assistant_turn(
+        [{"role": "user", "content": "Ответь"}]
+    )
+
+    assert turn.kind == "answer"
+    assert turn.message == "Готово"
+    assert len(completions.requests) == 2
+    assert completions.requests[1]["max_tokens"] == 1500
     get_settings.cache_clear()
 
 
@@ -110,7 +147,7 @@ async def test_character_generation_uses_strict_json_schema(monkeypatch):
     monkeypatch.setenv("DSLAB_API_KEY", "test-key")
     monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
     monkeypatch.setenv("DSLAB_VISION_MODEL", "gemini-2.5-flash-lite")
-    monkeypatch.setattr(ai_service, "AsyncOpenAI", make_client)
+    monkeypatch.setattr(content_ai_client, "AsyncOpenAI", make_client)
     get_settings.cache_clear()
 
     draft = await ai_service.generate_character(
@@ -163,7 +200,7 @@ async def test_text_character_generation_uses_deepseek(monkeypatch):
     monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
     monkeypatch.setenv("DSLAB_VISION_MODEL", "gemini-2.5-flash-lite")
     monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+        content_ai_client, "AsyncOpenAI", lambda **_: _FakeClient(completions)
     )
     get_settings.cache_clear()
 
@@ -197,7 +234,7 @@ async def test_character_generation_restores_omitted_labeled_section(monkeypatch
     monkeypatch.setenv("DSLAB_API_KEY", "test-key")
     monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
     monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+        content_ai_client, "AsyncOpenAI", lambda **_: _FakeClient(completions)
     )
     get_settings.cache_clear()
 
@@ -241,7 +278,7 @@ async def test_character_generation_retries_missing_image_description(monkeypatc
     monkeypatch.setenv("DSLAB_MODEL", "deepseek-v4-flash")
     monkeypatch.setenv("DSLAB_VISION_MODEL", "gemini-2.5-flash-lite")
     monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+        content_ai_client, "AsyncOpenAI", lambda **_: _FakeClient(completions)
     )
     get_settings.cache_clear()
 
@@ -297,7 +334,7 @@ async def test_contour_ai_cannot_change_selected_cards(monkeypatch):
     completions = _FakeCompletions(content)
     monkeypatch.setenv("DSLAB_API_KEY", "test-key")
     monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+        content_ai_client, "AsyncOpenAI", lambda **_: _FakeClient(completions)
     )
     get_settings.cache_clear()
 
@@ -331,7 +368,7 @@ async def test_card_ai_receives_selected_type_and_system_context(monkeypatch):
     completions = _FakeCompletions(content)
     monkeypatch.setenv("DSLAB_API_KEY", "test-key")
     monkeypatch.setattr(
-        ai_service, "AsyncOpenAI", lambda **_: _FakeClient(completions)
+        content_ai_client, "AsyncOpenAI", lambda **_: _FakeClient(completions)
     )
     get_settings.cache_clear()
 

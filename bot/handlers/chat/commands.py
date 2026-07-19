@@ -2,12 +2,14 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import character_arts as arts_crud
 from bot.database.engine import get_session
 from bot.services import card_service, character_service
 from bot.services.errors import ServiceError
 from bot.utils import formatters
 from bot.utils.messages import answer_long
 from bot.utils.validators import extract_vk_id, strip_mentions
+from bot.utils.photos import art_attachment
 
 # Все хендлеры этого модуля живут только в беседах.
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=True)])
@@ -18,9 +20,11 @@ HELP_TEXT = """Команды Жадного Мира:
 ?карта [название] — карточка из реестра (можно по номеру Особого слота)
 ?профиль — своя анкета
 ?профиль Имя или ID — чужая анкета (или ответом/упоминанием)
+?визитка [Имя или ID] — графическая карточка персонажа
 ?кубик — бросок 1–20
 ?кубик 6 — бросок 1–6
 ?кубик 1 20 — бросок в своих границах
+?использовать [#ID] Название [xКоличество] @игрок — потратить Заклинание или Обычную карту
 ?помощь — этот список
 
 Всё остальное - в личных сообщениях сообщества."""
@@ -69,7 +73,17 @@ async def own_profile(message: Message, **_: object) -> None:
 
         character = characters[0]
         cards = await cards_crud.list_character_cards(session, character.id)
-        await answer_long(message, formatters.character_profile(character, cards))
+        primary_art = await arts_crud.get_primary(session, character.id)
+        attachment = (
+            await art_attachment(message, primary_art)
+            if primary_art is not None
+            else None
+        )
+        await answer_long(
+            message,
+            formatters.character_profile(character, cards),
+            attachment=attachment,
+        )
 
 
 @labeler.message(text=["?профиль <query>", "?анкета <query>"])
@@ -78,11 +92,21 @@ async def other_profile(message: Message, query: str, **_: object) -> None:
         try:
             character = await _resolve_target(session, message, query)
             cards = await cards_crud.list_character_cards(session, character.id)
+            primary_art = await arts_crud.get_primary(session, character.id)
         except ServiceError as error:
             await message.answer(str(error))
             return
 
-        await answer_long(message, formatters.character_profile(character, cards))
+        attachment = (
+            await art_attachment(message, primary_art)
+            if primary_art is not None
+            else None
+        )
+        await answer_long(
+            message,
+            formatters.character_profile(character, cards),
+            attachment=attachment,
+        )
 
 
 async def _resolve_target(session, message: Message, query: str):

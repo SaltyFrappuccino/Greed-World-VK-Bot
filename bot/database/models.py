@@ -133,6 +133,75 @@ class Character(Base):
     contours: Mapped[list[Contour]] = relationship(
         back_populates="character", cascade="all, delete-orphan"
     )
+    arts: Mapped[list[CharacterArt]] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+        order_by="CharacterArt.created_at, CharacterArt.id",
+    )
+    profile_card: Mapped[CharacterProfileCard | None] = relationship(
+        back_populates="character",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class CharacterArt(Base):
+    """Локально сохранённое изображение, прикреплённое к анкете."""
+
+    __tablename__ = "character_arts"
+    __table_args__ = (
+        UniqueConstraint("character_id", "sha256", name="uq_character_art_hash"),
+        UniqueConstraint("storage_key", name="uq_character_art_storage_key"),
+        CheckConstraint("file_size > 0", name="ck_character_art_file_size"),
+        CheckConstraint("width > 0 AND height > 0", name="ck_character_art_dimensions"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    storage_key: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    mime_type: Mapped[str] = mapped_column(String(64))
+    file_size: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    caption: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    is_primary: Mapped[bool] = mapped_column(default=False, server_default="0", index=True)
+    vk_attachment: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    character: Mapped[Character] = relationship(back_populates="arts")
+
+
+class CharacterProfileCard(Base):
+    """Кэш сгенерированной PNG-визитки персонажа."""
+
+    __tablename__ = "character_profile_cards"
+    __table_args__ = (
+        UniqueConstraint("character_id", name="uq_character_profile_card_character"),
+        UniqueConstraint("storage_key", name="uq_character_profile_card_storage_key"),
+        CheckConstraint("file_size > 0", name="ck_character_profile_card_file_size"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    input_hash: Mapped[str] = mapped_column(String(64), index=True)
+    storage_key: Mapped[str] = mapped_column(String(255))
+    file_size: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer, default=1200, server_default="1200")
+    height: Mapped[int] = mapped_column(Integer, default=1600, server_default="1600")
+    vk_attachment: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    character: Mapped[Character] = relationship(back_populates="profile_card")
 
 
 class Contour(Base):
@@ -271,6 +340,34 @@ class ContourComponent(Base):
     contour: Mapped[Contour] = relationship(back_populates="components")
     ownership: Mapped[CardOwnership] = relationship(
         back_populates="contour_component"
+    )
+
+
+class CardUsage(Base):
+    """Audit record for copies explicitly consumed through a chat command."""
+
+    __tablename__ = "card_usages"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_card_usage_quantity_positive"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int | None] = mapped_column(
+        ForeignKey("characters.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    card_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cards.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    character_name: Mapped[str] = mapped_column(String(128))
+    card_name: Mapped[str] = mapped_column(String(128))
+    card_type: Mapped[CardType] = mapped_column(Enum(CardType, native_enum=False))
+    quantity: Mapped[int] = mapped_column(Integer)
+    ownership_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    used_by_vk_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    target_vk_id: Mapped[int | None] = mapped_column(BigInteger, index=True, nullable=True)
+    peer_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    conversation_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

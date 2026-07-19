@@ -1,9 +1,12 @@
 import pytest
+from types import SimpleNamespace
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
+from bot.database.models import CharacterArt
 from bot.services import ai_service
 from bot.services import admin_ai_assistant_service as service
+from bot.services.admin_ai import read_tools, write_tools
 from bot.services.errors import ValidationError
 from bot.services.errors import PermissionDenied
 
@@ -21,6 +24,162 @@ async def _session_and_character(session):
         session, admin_vk_id=500, peer_id=500
     )
     return ai_session, character
+
+
+@pytest.mark.asyncio
+async def test_character_creation_can_atomically_attach_current_image(
+    session, monkeypatch
+):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    attached: list[dict[str, object]] = []
+
+    async def fake_add_from_vk(_session, **kwargs):
+        attached.append(kwargs)
+        return SimpleNamespace(id=91, character_id=kwargs["character_id"])
+
+    monkeypatch.setattr(
+        write_tools.character_art_service, "add_from_vk", fake_add_from_vk
+    )
+    plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Создать анкету Пикколо с приложенным артом",
+        actions=[
+            {
+                "name": "character_create",
+                "arguments": {
+                    "vk_id": 485208149,
+                    "name": "Пикколо",
+                    "fields": {"age": "31", "appearance": "По приложенному арту."},
+                    "arts": [
+                        {
+                            "source_url": "https://sun.userapi.com/piccolo.jpg",
+                            "caption": "Основной арт",
+                            "make_primary": True,
+                        }
+                    ],
+                },
+                "description": "Создать анкету и прикрепить основной арт",
+            }
+        ],
+        warnings=[],
+    )
+
+    executed, done = await service.confirm_plan(
+        session, plan_id=plan.id, admin_vk_id=500, peer_id=500
+    )
+
+    characters = await characters_crud.list_by_vk_id(session, 485208149)
+    assert done is True
+    assert executed.status == "executed"
+    assert [(item.name, item.vk_id) for item in characters] == [
+        ("Пикколо", 485208149)
+    ]
+    assert attached == [
+        {
+            "character_id": characters[0].id,
+            "source_url": "https://sun.userapi.com/piccolo.jpg",
+            "vk_attachment": None,
+            "caption": "Основной арт",
+            "admin_vk_id": 500,
+            "make_primary": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_character_plan_normalizes_template_sections_from_flash_model(session):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Создать анкету из заполненного шаблона",
+        actions=[
+            {
+                "name": "character_create",
+                "arguments": {
+                    "vk_id": 485208149,
+                    "name": "Пикколо",
+                    "fields": {
+                        "age": "31",
+                        "gender": "Мужской",
+                        "appearance": "Зелёный намекианец.",
+                        "biography": "Воин с Земли.",
+                        "skills": ["Отличный тактик", "Аурафарм кинг"],
+                    },
+                    "character": "Сдержанный и решительный.",
+                    "stats": {
+                        "Стрессоустойчивость": "4",
+                        "Речевой аппарат": 3,
+                        "Чуйка": 4,
+                        "Хребет": 5,
+                        "Воля": 3,
+                        "Нюх": 3,
+                    },
+                    "weakness": "Привязанность к семье.",
+                    "rating": "H",
+                    "shakei": 0,
+                },
+                "description": "Создать Пикколо",
+            }
+        ],
+        warnings=[],
+    )
+
+    arguments = plan.actions[0]["arguments"]
+    fields = arguments["fields"]
+    assert set(arguments) == {"vk_id", "name", "fields"}
+    assert fields["personality"] == "Сдержанный и решительный."
+    assert fields["overall_rating"] == "H"
+    assert fields["stress_resistance"] == 4
+    assert fields["speech"] == 3
+    assert fields["intuition"] == 4
+    assert fields["spine"] == 5
+    assert fields["will"] == 3
+    assert fields["scent"] == 3
+    assert fields["skills"] == "Отличный тактик\nАурафарм кинг"
+    assert fields["additional"] == "Слабость: Привязанность к семье."
+    assert fields["is_approved"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_character_returns_primary_art_as_photo(session, monkeypatch):
+    character = await characters_crud.create(
+        session, vk_id=100, name="Пикколо", is_approved=True
+    )
+    session.add(
+        CharacterArt(
+            character_id=character.id,
+            storage_key="characters/1/art.jpg",
+            sha256="a" * 64,
+            mime_type="image/jpeg",
+            file_size=123,
+            width=900,
+            height=1400,
+            caption="Основной арт",
+            is_primary=True,
+            created_by=500,
+        )
+    )
+    await session.flush()
+    monkeypatch.setattr(
+        read_tools.art_storage_service, "read_bytes", lambda _key: b"image-data"
+    )
+
+    data, attachment = await read_tools._run_read_tool(
+        session, "get_character", {"character_id": character.id}
+    )
+
+    assert data["arts"][0]["is_primary"] is True
+    assert attachment is not None
+    assert attachment.kind == "photo"
+    assert attachment.data == b"image-data"
 
 
 @pytest.mark.asyncio
@@ -60,6 +219,61 @@ async def test_write_plan_changes_nothing_until_confirm_and_is_idempotent(sessio
             peer_id=500,
         )
     assert character.shakei_balance == 100
+
+
+@pytest.mark.asyncio
+async def test_ai_plan_grants_and_partially_revokes_card_quantity(session):
+    ai_session, character = await _session_and_character(session)
+    create_plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Создать три копии Заклинания",
+        actions=[
+            {
+                "name": "card_create_and_grant",
+                "arguments": {
+                    "character_id": character.id,
+                    "name": "Три искры",
+                    "card_type": "Заклинание",
+                    "kind": "Заклинание",
+                    "rarity": "H",
+                    "quantity": 3,
+                },
+                "description": "Создать и выдать три копии",
+            }
+        ],
+        warnings=[],
+    )
+    await service.confirm_plan(
+        session, plan_id=create_plan.id, admin_vk_id=500, peer_id=500
+    )
+    card = await cards_crud.get_by_name(session, "Три искры")
+    assert card is not None
+    assert len(await cards_crud.list_character_ownerships(session, character.id)) == 3
+
+    revoke_plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Забрать две копии",
+        actions=[
+            {
+                "name": "card_revoke",
+                "arguments": {
+                    "character_id": character.id,
+                    "card_id": card.id,
+                    "quantity": 2,
+                },
+                "description": "Забрать две свободные копии",
+            }
+        ],
+        warnings=[],
+    )
+    await service.confirm_plan(
+        session, plan_id=revoke_plan.id, admin_vk_id=500, peer_id=500
+    )
+    assert len(await cards_crud.list_character_ownerships(session, character.id)) == 1
 
 
 @pytest.mark.asyncio
@@ -221,6 +435,148 @@ async def test_read_tool_loop_can_answer_without_creating_plan(session, monkeypa
 
     assert outcome.text == "У Авы 0 Шакеев."
     assert outcome.plan is None
+
+
+@pytest.mark.asyncio
+async def test_current_images_and_resolved_vk_context_survive_agent_rounds(
+    session, monkeypatch
+):
+    ai_session, character = await _session_and_character(session)
+    calls: list[tuple[list[dict[str, str]], list[str] | None]] = []
+    turns = iter(
+        [
+            ai_service.AdminAssistantTurn(
+                kind="read_tools",
+                tools=[
+                    ai_service.AssistantToolCall(
+                        name="get_character",
+                        arguments={"character_id": character.id},
+                    )
+                ],
+            ),
+            ai_service.AdminAssistantTurn(kind="answer", message="Готово."),
+        ]
+    )
+
+    async def fake_turn(history, **kwargs):
+        calls.append((history, kwargs.get("image_urls")))
+        return next(turns)
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", fake_turn)
+    await service.process_message(
+        session,
+        session_id=ai_session.id,
+        admin_vk_id=500,
+        peer_id=500,
+        text="Посмотри арт владельца",
+        image_urls=["https://sun.userapi.com/piccolo.jpg"],
+        trusted_context=(
+            "Проверено через VK API: vk.ru/piccolo → числовой VK ID 485208149"
+        ),
+    )
+
+    assert len(calls) == 2
+    assert calls[0][1] == ["https://sun.userapi.com/piccolo.jpg"]
+    assert calls[1][1] == ["https://sun.userapi.com/piccolo.jpg"]
+    assert "числовой VK ID 485208149" in str(calls[0][0])
+
+
+@pytest.mark.asyncio
+async def test_agent_repairs_text_vk_name_used_as_character_id(session, monkeypatch):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    turns = iter(
+        [
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Некорректный первый план",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="character_create",
+                        arguments={"vk_id": 485208149, "name": "Пикколо"},
+                    ),
+                    ai_service.AssistantAction(
+                        name="character_art_add",
+                        arguments={
+                            "character_id": "idi_nahuy_dayn_tupoi",
+                            "image_index": 1,
+                        },
+                    ),
+                ],
+            ),
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Создать анкету вместе с артом",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="character_create",
+                        arguments={
+                            "vk_id": 485208149,
+                            "name": "Пикколо",
+                            "arts": [{"image_index": 1, "make_primary": True}],
+                        },
+                    )
+                ],
+            ),
+        ]
+    )
+    histories = []
+
+    async def fake_turn(history, **_kwargs):
+        histories.append(history)
+        return next(turns)
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", fake_turn)
+    outcome = await service.process_message(
+        session,
+        session_id=ai_session.id,
+        admin_vk_id=500,
+        peer_id=500,
+        text="Создай анкету владельцу по короткой ссылке и прикрепи арт",
+        image_urls=["https://sun.userapi.com/piccolo.jpg"],
+        trusted_context="Числовой VK ID владельца: 485208149",
+    )
+
+    assert outcome.plan is not None
+    arguments = outcome.plan.actions[0]["arguments"]
+    assert arguments["vk_id"] == 485208149
+    assert arguments["arts"][0]["source_url"].endswith("piccolo.jpg")
+    assert "character_id.*целым числом" not in str(histories[0])
+    assert "character_id должно быть целым числом" in str(histories[1])
+
+
+@pytest.mark.asyncio
+async def test_agent_stops_after_same_invalid_plan_twice(session, monkeypatch):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+
+    async def invalid_turn(*_args, **_kwargs):
+        return ai_service.AdminAssistantTurn(
+            kind="action_plan",
+            message="Некорректный план",
+            actions=[
+                ai_service.AssistantAction(
+                    name="character_create",
+                    arguments={
+                        "vk_id": 485208149,
+                        "name": "Пикколо",
+                        "fields": {"alien_field": "не существует"},
+                    },
+                )
+            ],
+        )
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", invalid_turn)
+    with pytest.raises(ValidationError, match="дважды предложил"):
+        await service.process_message(
+            session,
+            session_id=ai_session.id,
+            admin_vk_id=500,
+            peer_id=500,
+            text="Создай анкету",
+        )
 
 
 @pytest.mark.asyncio
@@ -447,3 +803,97 @@ async def test_service_rechecks_admin_for_direct_calls(session, monkeypatch):
     monkeypatch.setattr(service.auth_service, "require_admin", deny)
     with pytest.raises(PermissionDenied):
         await service.open_session(session, admin_vk_id=123, peer_id=123)
+
+
+@pytest.mark.asyncio
+async def test_plan_rejects_transform_limit_for_contour_card(session):
+    ai_session, character = await _session_and_character(session)
+
+    with pytest.raises(ValidationError, match="только для Особой"):
+        await service.create_plan(
+            session,
+            ai_session=ai_session,
+            admin_vk_id=500,
+            summary="Некорректная Контурная карта",
+            actions=[
+                {
+                    "name": "card_create_and_grant",
+                    "arguments": {
+                        "character_id": character.id,
+                        "name": "Перенос",
+                        "card_type": "Контурная",
+                        "kind": "Форма — Область",
+                        "rarity": "H",
+                        "transform_limit": 3,
+                    },
+                    "description": "Создать и выдать карту",
+                }
+            ],
+            warnings=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_repairs_rejected_card_plan_before_showing_it(session, monkeypatch):
+    ai_session, character = await _session_and_character(session)
+    turns = iter(
+        [
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Первый план",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="card_create_and_grant",
+                        arguments={
+                            "character_id": character.id,
+                            "name": "Перенос",
+                            "card_type": "Контурная",
+                            "kind": "Заклинание",
+                            "rarity": "H",
+                            "transform_limit": 3,
+                        },
+                        description="Некорректный план",
+                    )
+                ],
+            ),
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Исправленный план",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="card_create_and_grant",
+                        arguments={
+                            "character_id": character.id,
+                            "name": "Перенос",
+                            "card_type": "Заклинание",
+                            "kind": "Заклинание",
+                            "rarity": "H",
+                            "description": "Перемещает выбранную цель.",
+                            "usage": "Активируется произнесением названия.",
+                        },
+                        description="Создать Карту Заклинаний и выдать Аве",
+                    )
+                ],
+            ),
+        ]
+    )
+    histories = []
+
+    async def fake_turn(history, **_kwargs):
+        histories.append(history)
+        return next(turns)
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", fake_turn)
+    outcome = await service.process_message(
+        session,
+        session_id=ai_session.id,
+        admin_vk_id=500,
+        peer_id=500,
+        text="Придумай карту Перенос и выдай Аве.",
+    )
+
+    assert outcome.plan is not None
+    assert outcome.plan.summary == "Исправленный план"
+    assert outcome.plan.actions[0]["arguments"]["card_type"] == "Заклинание"
+    assert "transform_limit" not in outcome.plan.actions[0]["arguments"]
+    assert "нарушает бизнес-правила" in str(histories[1])

@@ -11,4 +11,5 @@ venv/
 .vkbottle
 outputs/
 backups/
-.codex-bot.*.log
+storage/
+*.log

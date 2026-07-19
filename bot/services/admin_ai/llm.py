@@ -1,20 +1,25 @@
 import logging
+from time import perf_counter
 
-from openai import AsyncOpenAI, OpenAIError
+from openai import APITimeoutError, AsyncOpenAI, OpenAIError
 from pydantic import ValidationError as PydanticValidationError
 
 from bot.config import get_settings
 from bot.services.admin_ai.contracts import AdminAssistantTurn, parse_turn
+from bot.services.admin_ai.diagnostics import elapsed_ms, response_shape
 from bot.services.admin_ai.prompt import build_system_prompt
 from bot.services.errors import ServiceError, ValidationError
 
-logger = logging.getLogger(__name__)
-AGENT_MAX_TOKENS = 3_500
+logger = logging.getLogger("zhadny_mir.ai_agent.llm")
 REPAIR_MAX_TOKENS = 1_500
 
 
 async def generate_admin_assistant_turn(
-    history: list[dict[str, str]], *, image_urls: list[str] | None = None
+    history: list[dict[str, str]],
+    *,
+    image_urls: list[str] | None = None,
+    request_id: str = "standalone",
+    round_number: int = 0,
 ) -> AdminAssistantTurn:
     settings = get_settings()
     if not settings.dslab_api_key:
@@ -38,34 +43,129 @@ async def generate_admin_assistant_turn(
                 ],
             }
         )
+    model = settings.dslab_vision_model if image_urls else settings.dslab_model
+    started_at = perf_counter()
+    logger.info(
+        "request.start request_id=%s round=%s model=%s timeout_seconds=%s "
+        "max_tokens=%s messages=%s history_chars=%s images=%s",
+        request_id,
+        round_number,
+        model,
+        settings.dslab_agent_timeout_seconds,
+        settings.dslab_agent_max_tokens,
+        len(messages),
+        sum(len(str(item.get("content", ""))) for item in history),
+        len(image_urls or []),
+    )
     try:
         async with AsyncOpenAI(
-            api_key=settings.dslab_api_key, base_url=settings.dslab_base_url
+            api_key=settings.dslab_api_key,
+            base_url=settings.dslab_base_url,
+            timeout=settings.dslab_agent_timeout_seconds,
+            max_retries=0,
         ) as client:
             response = await client.chat.completions.create(
-                model=settings.dslab_vision_model if image_urls else settings.dslab_model,
-                max_tokens=min(settings.dslab_max_tokens, AGENT_MAX_TOKENS),
+                model=model,
+                max_tokens=settings.dslab_agent_max_tokens,
                 temperature=0,
                 messages=messages,
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
+            usage = getattr(response, "usage", None)
+            choice = response.choices[0]
+            logger.info(
+                "request.done request_id=%s round=%s duration_ms=%s response_id=%s "
+                "finish_reason=%s response_chars=%s prompt_tokens=%s completion_tokens=%s",
+                request_id,
+                round_number,
+                elapsed_ms(started_at),
+                getattr(response, "id", None),
+                getattr(choice, "finish_reason", None),
+                len(content),
+                getattr(usage, "prompt_tokens", None),
+                getattr(usage, "completion_tokens", None),
+            )
             try:
-                return parse_turn(content)
+                turn = parse_turn(content)
+                logger.info(
+                    "parse.ok request_id=%s round=%s kind=%s tools=%s actions=%s warnings=%s",
+                    request_id,
+                    round_number,
+                    turn.kind,
+                    len(turn.tools),
+                    len(turn.actions),
+                    len(turn.warnings),
+                )
+                return turn
             except (ValueError, PydanticValidationError) as error:
                 logger.warning(
-                    "Некорректный JSON AI-Ассистента: %s; ответ=%r",
+                    "parse.failed request_id=%s round=%s error_type=%s error=%s %s",
+                    request_id,
+                    round_number,
+                    type(error).__name__,
                     error,
-                    content[:2000],
+                    response_shape(content),
                 )
-                return await _repair_turn(client, settings.dslab_model, content, error)
+                logger.debug(
+                    "parse.failed.raw request_id=%s round=%s content=%r",
+                    request_id,
+                    round_number,
+                    content[:6000],
+                )
+                return await _repair_turn(
+                    client,
+                    settings.dslab_model,
+                    content,
+                    error,
+                    request_id=request_id,
+                    round_number=round_number,
+                )
+    except APITimeoutError as error:
+        logger.error(
+            "request.timeout request_id=%s round=%s duration_ms=%s model=%s "
+            "timeout_seconds=%s",
+            request_id,
+            round_number,
+            elapsed_ms(started_at),
+            model,
+            settings.dslab_agent_timeout_seconds,
+            exc_info=True,
+        )
+        raise ServiceError(
+            f"DS Lab не ответил за {settings.dslab_agent_timeout_seconds:g} секунд. "
+            f"Код запроса: {request_id}."
+        ) from error
     except OpenAIError as error:
-        raise ServiceError(f"Ошибка DS Lab: {error}") from error
+        logger.error(
+            "request.failed request_id=%s round=%s duration_ms=%s model=%s error=%s",
+            request_id,
+            round_number,
+            elapsed_ms(started_at),
+            model,
+            error,
+            exc_info=True,
+        )
+        raise ServiceError(f"Ошибка DS Lab: {error}. Код запроса: {request_id}.") from error
 
 
 async def _repair_turn(
-    client: AsyncOpenAI, model: str, content: str, error: Exception
+    client: AsyncOpenAI,
+    model: str,
+    content: str,
+    error: Exception,
+    *,
+    request_id: str,
+    round_number: int,
 ) -> AdminAssistantTurn:
+    started_at = perf_counter()
+    logger.info(
+        "repair.start request_id=%s round=%s model=%s source_chars=%s",
+        request_id,
+        round_number,
+        model,
+        len(content),
+    )
     response = await client.chat.completions.create(
         model=model,
         max_tokens=REPAIR_MAX_TOKENS,
@@ -91,11 +191,40 @@ async def _repair_turn(
         response_format={"type": "json_object"},
     )
     repaired = response.choices[0].message.content or ""
+    logger.info(
+        "repair.done request_id=%s round=%s duration_ms=%s response_chars=%s",
+        request_id,
+        round_number,
+        elapsed_ms(started_at),
+        len(repaired),
+    )
     try:
-        return parse_turn(repaired)
+        turn = parse_turn(repaired)
+        logger.info(
+            "repair.parse.ok request_id=%s round=%s kind=%s tools=%s actions=%s",
+            request_id,
+            round_number,
+            turn.kind,
+            len(turn.tools),
+            len(turn.actions),
+        )
+        return turn
     except (ValueError, PydanticValidationError) as error:
-        logger.warning("Repair JSON AI-Ассистента не удался: %s", error)
+        logger.warning(
+            "repair.parse.failed request_id=%s round=%s error_type=%s error=%s %s",
+            request_id,
+            round_number,
+            type(error).__name__,
+            error,
+            response_shape(repaired),
+        )
+        logger.debug(
+            "repair.parse.failed.raw request_id=%s round=%s content=%r",
+            request_id,
+            round_number,
+            repaired[:6000],
+        )
         raise ServiceError(
             "AI вернул повреждённый ответ даже после автоматического исправления. "
-            "Попробуйте повторить задачу короче."
+            f"Код запроса: {request_id}."
         ) from error

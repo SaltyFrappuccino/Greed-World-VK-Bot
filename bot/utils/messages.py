@@ -24,8 +24,18 @@ def split_message(text: str, limit: int = VK_MESSAGE_LIMIT) -> list[str]:
     return chunks
 
 
-async def answer_long(message: Any, text: str, *, keyboard: str | None = None) -> None:
+async def answer_long(
+    message: Any,
+    text: str,
+    *,
+    keyboard: str | None = None,
+    attachment: str | None = None,
+) -> None:
     chunks = split_message(text)
-    for chunk in chunks[:-1]:
-        await message.answer(chunk)
-    await message.answer(chunks[-1], keyboard=keyboard)
+    for index, chunk in enumerate(chunks):
+        params: dict[str, str] = {}
+        if index == 0 and attachment:
+            params["attachment"] = attachment
+        if index == len(chunks) - 1 and keyboard:
+            params["keyboard"] = keyboard
+        await message.answer(chunk, **params)

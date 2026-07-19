@@ -1,9 +1,24 @@
+from dataclasses import dataclass
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import cards as cards_crud
 from bot.database.crud import characters as characters_crud
-from bot.database.models import Card, CardOwnership, CardType, Rarity
+from bot.database.models import Card, CardOwnership, CardType, CardUsage, Rarity
 from bot.services.errors import NotFoundError, TransformLimitReached, ValidationError
+
+MAX_CARD_QUANTITY = 999
+
+
+@dataclass(frozen=True)
+class CardConsumption:
+    usage_id: int
+    character_id: int
+    character_name: str
+    card_name: str
+    card_type: CardType
+    quantity: int
+    remaining_free: int
 
 
 async def create_card(
@@ -163,6 +178,18 @@ def remaining_transforms(card: Card, live_copies: int) -> int | None:
 
 async def grant_card(session: AsyncSession, card_id: int, character_id: int) -> CardOwnership:
     """Выдать копию карты персонажу с проверкой лимита преобразований."""
+    return (await grant_card_copies(session, card_id, character_id, quantity=1))[0]
+
+
+async def grant_card_copies(
+    session: AsyncSession,
+    card_id: int,
+    character_id: int,
+    *,
+    quantity: int,
+) -> list[CardOwnership]:
+    """Atomically grant several independent physical copies."""
+    quantity = _validate_quantity(quantity)
     # Блокировка сериализует параллельные выдачи одной карты в PostgreSQL.
     card = await cards_crud.get_by_id_for_update(session, card_id)
     if card is None:
@@ -175,16 +202,23 @@ async def grant_card(session: AsyncSession, card_id: int, character_id: int) -> 
         raise NotFoundError("Персонаж не найден.")
 
     live_copies = await cards_crud.count_owners(session, card_id)
-    if card.transform_limit is not None and live_copies >= card.transform_limit:
+    if (
+        card.transform_limit is not None
+        and live_copies + quantity > card.transform_limit
+    ):
         raise TransformLimitReached(
-            f"Лимит преобразований карты «{card.name}» исчерпан: "
-            f"{live_copies} из {card.transform_limit} копий уже на руках."
+            f"Нельзя выдать {quantity} коп.: у карты «{card.name}» уже "
+            f"{live_copies} из {card.transform_limit} допустимых копий."
         )
 
-    ownership = await cards_crud.add_ownership(session, card_id, character_id)
-    card.copies_count = live_copies + 1
+    ownerships = [
+        CardOwnership(card_id=card_id, character_id=character_id)
+        for _ in range(quantity)
+    ]
+    session.add_all(ownerships)
+    card.copies_count = live_copies + quantity
     await session.flush()
-    return ownership
+    return ownerships
 
 
 async def grant_ordinary_card(
@@ -197,6 +231,32 @@ async def grant_ordinary_card(
     description: str = "",
     usage: str = "",
 ) -> CardOwnership:
+    return (
+        await grant_ordinary_cards(
+            session,
+            character_id=character_id,
+            name=name,
+            kind=kind,
+            rarity=rarity,
+            description=description,
+            usage=usage,
+            quantity=1,
+        )
+    )[0]
+
+
+async def grant_ordinary_cards(
+    session: AsyncSession,
+    *,
+    character_id: int,
+    name: str,
+    kind: str,
+    rarity: Rarity,
+    description: str = "",
+    usage: str = "",
+    quantity: int,
+) -> list[CardOwnership]:
+    quantity = _validate_quantity(quantity)
     if not name.strip():
         raise ValidationError("Название Обычной карты не может быть пустым.")
     if not kind.strip():
@@ -204,36 +264,75 @@ async def grant_ordinary_card(
     character = await characters_crud.get_by_id(session, character_id)
     if character is None:
         raise NotFoundError("Персонаж не найден.")
-    return await cards_crud.add_ordinary_ownership(
-        session,
-        character_id=character_id,
-        name=name,
-        kind=kind,
-        rarity=rarity,
-        description=description,
-        usage=usage,
-    )
+    ownerships = [
+        CardOwnership(
+            character_id=character_id,
+            card_id=None,
+            ordinary_name=name.strip(),
+            ordinary_kind=kind.strip(),
+            ordinary_rarity=rarity,
+            ordinary_description=description.strip(),
+            ordinary_usage=usage.strip(),
+        )
+        for _ in range(quantity)
+    ]
+    session.add_all(ownerships)
+    await session.flush()
+    return ownerships
 
 
 async def revoke_ordinary_card(
     session: AsyncSession, *, character_id: int, name: str
 ) -> None:
-    ownership = await cards_crud.get_free_ordinary_ownership(
+    await revoke_ordinary_cards(
+        session, character_id=character_id, name=name, quantity=1
+    )
+
+
+async def revoke_ordinary_cards(
+    session: AsyncSession, *, character_id: int, name: str, quantity: int
+) -> list[int]:
+    quantity = _validate_quantity(quantity)
+    ownerships = await cards_crud.list_free_ordinary_ownerships(
         session, character_id, name
     )
-    if ownership is None:
+    if not ownerships:
         raise NotFoundError(
             "Свободная Обычная карта с таким названием у персонажа не найдена."
         )
-    await cards_crud.remove_ownership(session, ownership)
+    if len(ownerships) < quantity:
+        raise ValidationError(
+            f"Свободных копий карты «{name.strip()}» только {len(ownerships)}, "
+            f"а запрошено {quantity}."
+        )
+    selected = ownerships[:quantity]
+    ids = [item.id for item in selected]
+    for ownership in selected:
+        await session.delete(ownership)
+    await session.flush()
+    return ids
 
 
 async def revoke_card(session: AsyncSession, card_id: int, character_id: int) -> None:
     """Забрать копию карты - освобождает одно преобразование."""
-    ownership = await cards_crud.get_free_ownership(
+    await revoke_card_copies(session, card_id, character_id, quantity=1)
+
+
+async def revoke_card_copies(
+    session: AsyncSession,
+    card_id: int,
+    character_id: int,
+    *,
+    quantity: int,
+) -> list[int]:
+    quantity = _validate_quantity(quantity)
+    card = await cards_crud.get_by_id_for_update(session, card_id)
+    if card is None:
+        raise NotFoundError("Карта не найдена.")
+    ownerships = await cards_crud.list_free_ownerships(
         session, card_id, character_id
     )
-    if ownership is None:
+    if not ownerships:
         existing = await cards_crud.get_ownership(session, card_id, character_id)
         if existing is None:
             raise NotFoundError("У этого персонажа такой карты нет.")
@@ -241,13 +340,107 @@ async def revoke_card(session: AsyncSession, card_id: int, character_id: int) ->
             "Все копии этой карты связаны с Контурами. Сначала измените или "
             "разберите Контур."
         )
-
-    await cards_crud.remove_ownership(session, ownership)
-
-    card = await cards_crud.get_by_id(session, card_id)
-    if card is not None:
-        card.copies_count = await cards_crud.count_owners(session, card_id)
+    if len(ownerships) < quantity:
+        raise ValidationError(
+            f"Свободных копий карты «{card.name}» только {len(ownerships)}, "
+            f"а запрошено {quantity}. Связанные копии не списываются."
+        )
+    selected = ownerships[:quantity]
+    ids = [item.id for item in selected]
+    live_copies = await cards_crud.count_owners(session, card_id)
+    for ownership in selected:
+        await session.delete(ownership)
+    card.copies_count = max(live_copies - quantity, 0)
     await session.flush()
+    return ids
+
+
+async def consume_card(
+    session: AsyncSession,
+    *,
+    character_id: int,
+    used_by_vk_id: int,
+    name: str,
+    quantity: int,
+    target_vk_id: int | None,
+    peer_id: int,
+    conversation_message_id: int | None,
+) -> CardConsumption:
+    """Consume free Spell or Ordinary copies and write an immutable audit row."""
+    quantity = _validate_quantity(quantity)
+    character = await characters_crud.get_by_id(session, character_id)
+    if character is None:
+        raise NotFoundError("Персонаж не найден.")
+    if character.vk_id != used_by_vk_id:
+        raise ValidationError("Можно расходовать карты только собственной анкеты.")
+
+    ownerships = await cards_crud.list_free_consumable_ownerships(
+        session, character_id, name
+    )
+    if not ownerships:
+        all_items = await cards_crud.list_character_ownerships(session, character_id)
+        bound = [
+            item
+            for item in all_items
+            if item.display_name.casefold() == name.strip().casefold()
+            and item.display_type in {CardType.SPELL, CardType.ORDINARY}
+            and item.contour_component is not None
+        ]
+        if bound:
+            raise ValidationError(
+                "Все подходящие копии связаны с Контурами и не могут быть потрачены."
+            )
+        raise NotFoundError(
+            "Свободная Карта Заклинаний или Обычная карта с таким названием не найдена."
+        )
+
+    groups = {
+        (item.display_type, item.card_id if item.card_id is not None else "ordinary")
+        for item in ownerships
+    }
+    if len(groups) > 1:
+        raise ValidationError(
+            "Найдены и реестровая, и Обычная карта с таким названием. "
+            "Переименуйте Обычную карту или расходуйте её через администратора."
+        )
+    if len(ownerships) < quantity:
+        raise ValidationError(
+            f"Свободных копий «{ownerships[0].display_name}» только "
+            f"{len(ownerships)}, а запрошено {quantity}."
+        )
+
+    selected = ownerships[:quantity]
+    first = selected[0]
+    ownership_ids = [item.id for item in selected]
+    usage = CardUsage(
+        character_id=character.id,
+        card_id=first.card_id,
+        character_name=character.name,
+        card_name=first.display_name,
+        card_type=first.display_type,
+        quantity=quantity,
+        ownership_ids=ownership_ids,
+        used_by_vk_id=used_by_vk_id,
+        target_vk_id=target_vk_id,
+        peer_id=peer_id,
+        conversation_message_id=conversation_message_id,
+    )
+    session.add(usage)
+    for ownership in selected:
+        await session.delete(ownership)
+    if first.card is not None:
+        live_copies = await cards_crud.count_owners(session, first.card.id)
+        first.card.copies_count = max(live_copies - quantity, 0)
+    await session.flush()
+    return CardConsumption(
+        usage_id=usage.id,
+        character_id=character.id,
+        character_name=character.name,
+        card_name=first.display_name,
+        card_type=first.display_type,
+        quantity=quantity,
+        remaining_free=len(ownerships) - quantity,
+    )
 
 
 async def recount_copies(session: AsyncSession, card_id: int) -> int:
@@ -258,3 +451,13 @@ async def recount_copies(session: AsyncSession, card_id: int) -> int:
     card.copies_count = await cards_crud.count_owners(session, card_id)
     await session.flush()
     return card.copies_count
+
+
+def _validate_quantity(quantity: int) -> int:
+    if isinstance(quantity, bool) or not isinstance(quantity, int):
+        raise ValidationError("Количество карт должно быть целым числом.")
+    if not 1 <= quantity <= MAX_CARD_QUANTITY:
+        raise ValidationError(
+            f"Количество карт должно быть от 1 до {MAX_CARD_QUANTITY}."
+        )
+    return quantity

@@ -94,3 +94,13 @@ def parse_vk_reference(text: str) -> int | str:
     raise ValidationError(
         "Пришлите VK ID, упоминание или ссылку на профиль, например vk.ru/username."
     )
+
+
+def extract_vk_profile_urls(text: str) -> list[str]:
+    """Найти ссылки на профили VK внутри произвольного пользовательского текста."""
+    result: list[str] = []
+    for match in _VK_PROFILE_URL_RE.finditer(text):
+        url = match.group(0).rstrip("/.,;:!?)\"]}")
+        if url not in result:
+            result.append(url)
+    return result

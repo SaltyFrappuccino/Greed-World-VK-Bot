@@ -5,16 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.crud import contours as contours_crud
-from bot.database.models import Card, CardOwnership, CardType, Character, Contour
+from bot.database.models import Card, CardOwnership, CardType, Character, CharacterArt, Contour
 from bot.services.errors import NotFoundError, ServiceError
+from bot.services import art_storage_service
 
 
 @dataclass(frozen=True)
@@ -46,8 +49,10 @@ async def export_character_profile(
         raise NotFoundError("Анкета не найдена.")
     ownerships = await cards_crud.list_character_ownerships(session, character_id)
     contours = await contours_crud.list_for_character(session, character_id)
+    arts = await arts_crud.list_for_character(session, character_id)
     sheets = [
         _profile_sheet(character),
+        _arts_sheet(character, arts),
         _contours_sheet(character, contours),
         *_character_card_sheets(character.name, ownerships),
     ]
@@ -180,6 +185,56 @@ def _contours_sheet(
     }
 
 
+def _arts_sheet(
+    character: Character, arts: list[CharacterArt]
+) -> dict[str, object]:
+    rows = [
+        [
+            art.id,
+            "Да" if art.is_primary else "Нет",
+            art.caption,
+            art.mime_type,
+            art.width,
+            art.height,
+            art.file_size,
+            art.sha256,
+            art.created_by,
+            _excel_datetime(art.created_at),
+            "",
+        ]
+        for art in arts
+    ]
+    return {
+        "name": "Арты",
+        "title": f"Арты персонажа «{character.name}»",
+        "subtitle": f"Всего изображений: {len(arts)}",
+        "headers": [
+            "ID арта",
+            "Основной",
+            "Подпись",
+            "Формат",
+            "Ширина",
+            "Высота",
+            "Размер, байт",
+            "SHA-256",
+            "Добавил VK ID",
+            "Дата добавления",
+            "Превью",
+        ],
+        "rows": rows,
+        "dateColumns": [9],
+        "widths": [10, 12, 36, 16, 12, 12, 16, 68, 18, 20, 28],
+        "images": [
+            {
+                "row": index + 4,
+                "column": 11,
+                "data": art_storage_service.thumbnail_bytes(art.storage_key),
+            }
+            for index, art in enumerate(arts)
+        ],
+    }
+
+
 def _character_sheet(
     character_name: str,
     ownerships: list[CardOwnership],
@@ -187,11 +242,24 @@ def _character_sheet(
     title: str,
 ) -> dict[str, object]:
     selected = [item for item in ownerships if item.display_type is card_type]
+    totals: dict[tuple[str, object], list[int]] = {}
+    for item in selected:
+        key = _ownership_group_key(item)
+        counts = totals.setdefault(key, [0, 0, 0])
+        counts[0] += 1
+        if item.contour_component is None:
+            counts[1] += 1
+        else:
+            counts[2] += 1
     headers = [
+        "ID физической копии",
         "Игровой номер",
         "Название",
         "Вид / подтип",
         "Редкость",
+        "Всего одинаковых",
+        "Свободно",
+        "Связано",
         "Описание",
         "Способ использования",
         "Дата получения",
@@ -212,12 +280,17 @@ def _character_sheet(
             if ownership.contour_component is not None
             else "Свободна"
         )
+        total, free, bound = totals[_ownership_group_key(ownership)]
         rows.append(
             [
+                ownership.id,
                 game_number,
                 ownership.display_name,
                 ownership.display_kind,
                 ownership.display_rarity.value,
+                total,
+                free,
+                bound,
                 ownership.display_description,
                 ownership.display_usage,
                 _excel_datetime(ownership.obtained_at),
@@ -230,9 +303,15 @@ def _character_sheet(
         "subtitle": f"Всего физических копий в категории: {len(rows)}",
         "headers": headers,
         "rows": rows,
-        "dateColumns": [6],
-        "widths": [14, 24, 22, 10, 42, 42, 20, 22],
+        "dateColumns": [10],
+        "widths": [18, 14, 24, 22, 10, 18, 12, 12, 42, 42, 20, 22],
     }
+
+
+def _ownership_group_key(ownership: CardOwnership) -> tuple[str, object]:
+    if ownership.card_id is not None:
+        return "registry", ownership.card_id
+    return "ordinary", ownership.display_name.casefold()
 
 
 def _registry_sheet(
@@ -371,6 +450,17 @@ def _add_sheet(workbook: Workbook, definition: dict[str, object], index: int) ->
 
     for column, width in enumerate(display_widths, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
+    for image_data in definition.get("images", []):
+        image = ExcelImage(BytesIO(image_data["data"]))
+        scale = min(160 / image.width, 160 / image.height, 1)
+        image.width *= scale
+        image.height *= scale
+        anchor = f"{get_column_letter(int(image_data['column']))}{int(image_data['row'])}"
+        sheet.add_image(image, anchor)
+        sheet.row_dimensions[int(image_data["row"])].height = max(
+            sheet.row_dimensions[int(image_data["row"])].height or 15,
+            125,
+        )
     sheet.freeze_panes = "A4"
     sheet.sheet_view.showGridLines = False
     if not rows:

@@ -2,6 +2,7 @@ from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import character_arts as arts_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.engine import get_session
 from bot.keyboards.main_menu import (
@@ -13,6 +14,7 @@ from bot.services import character_service
 from bot.states import clear_state
 from bot.utils import formatters
 from bot.utils.messages import answer_long
+from bot.utils.photos import art_attachment
 from bot.utils.pagination import PAGE_SIZE, normalize_page
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
@@ -51,6 +53,7 @@ async def show_character(
             await message.answer("Анкета не найдена.", keyboard=back_to_menu())
             return
         cards = await cards_crud.list_character_cards(session, character.id)
+        primary_art = await arts_crud.get_primary(session, character.id)
         text = (
             f"Владелец: https://vk.ru/id{character.vk_id}\n\n"
             + formatters.character_profile(character, cards)
@@ -58,6 +61,11 @@ async def show_character(
         can_view_contours = is_admin or character.vk_id == message.from_id
 
     await clear_state(message.peer_id)
+    attachment = (
+        await art_attachment(message, primary_art)
+        if primary_art is not None
+        else None
+    )
     await answer_long(
         message,
         text,
@@ -67,6 +75,7 @@ async def show_character(
             is_admin=is_admin,
             can_view_contours=can_view_contours,
         ),
+        attachment=attachment,
     )
 
 

@@ -4,6 +4,7 @@ import pytest
 
 from bot.database.models import CardType
 from bot.handlers.dm.admin import cards
+from bot.handlers.dm.admin.card_handlers import wizard as card_create
 from bot.services.card_template_service import CONTOUR_SUBTYPES
 from bot.states import AdminCardState, clear_state, state_dispenser
 
@@ -118,12 +119,12 @@ async def test_spell_fields_are_combined_without_losing_labels(monkeypatch):
         "rarity": "A",
     }
 
-    await cards._after_description(message, payload, "Призывает существо")
+    await card_create._after_description(message, payload, "Призывает существо")
     state = await state_dispenser.get(message.peer_id)
     assert state is not None
     assert state.state == AdminCardState.ADD_SPELL_ACTIVATION
 
-    await cards._after_spell_activation(
+    await card_create._after_spell_activation(
         message, dict(state.payload), "Назвать цель"
     )
     state = await state_dispenser.get(message.peer_id)
@@ -131,10 +132,10 @@ async def test_spell_fields_are_combined_without_losing_labels(monkeypatch):
     assert state.state == AdminCardState.ADD_SPELL_CONSUMPTION
 
     create_mock = AsyncMock()
-    monkeypatch.setattr(cards, "_create_wizard_card", create_mock)
+    monkeypatch.setattr(card_create, "_create_wizard_card", create_mock)
     final_payload = dict(state.payload)
     final_payload["consumption"] = "Исчезает после применения"
-    await cards._create_spell_card(message, final_payload)
+    await card_create._create_spell_card(message, final_payload)
 
     saved_payload = create_mock.await_args.args[1]
     assert saved_payload["usage"] == (

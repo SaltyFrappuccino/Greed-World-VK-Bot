@@ -34,6 +34,7 @@ class AdminCardState(BaseStateGroup):
     TYPE = "type"
     ADD_MODE = "add_mode"
     ORDINARY_CHARACTER = "ordinary_character"
+    ORDINARY_QUANTITY = "ordinary_quantity"
     ADD_TEMPLATE = "add_template"
     ADD_AI_SOURCE = "add_ai_source"
     ADD_AI_CONFIRM = "add_ai_confirm"
@@ -74,6 +75,11 @@ class AdminCharacterState(BaseStateGroup):
     TEMPLATE = "template"
     EDIT_PICK = "edit_pick"
     EDIT_VALUE = "edit_value"
+
+
+class AdminArtState(BaseStateGroup):
+    UPLOAD = "upload"
+    CAPTION = "caption"
 
 
 class AdminAIState(BaseStateGroup):
@@ -144,6 +150,10 @@ def default_return_context(
     if state_name.startswith("AdminCharacterState"):
         if character_id:
             return {"screen": "character", "id": character_id}
+        return {"screen": "admin_characters"}
+    if state_name.startswith("AdminArtState"):
+        if character_id:
+            return {"screen": "character_arts", "id": character_id}
         return {"screen": "admin_characters"}
     if state_name.startswith("AdminStatsState"):
         return {"screen": "admin_characters"}

@@ -83,6 +83,11 @@ async def render_return(
 
         await _show_contours_page(message, target_id, 0, is_admin=is_admin)
         return
+    if screen == "character_arts" and target_id:
+        from bot.handlers.dm.arts import _show_character_arts
+
+        await _show_character_arts(message, target_id, is_admin=is_admin)
+        return
     if screen == "contour" and target_id:
         await _contour(message, target_id, is_admin=is_admin)
         return
