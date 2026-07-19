@@ -1,4 +1,6 @@
 import json
+import re
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,7 @@ from bot.database.models import AdminAIPlan, AdminAISession
 from bot.services import auth_service, character_service
 from bot.services.admin_ai.sessions import _owned_session
 from bot.services.admin_ai.normalizers import normalize_action_arguments
+from bot.services.admin_ai.read_tools import READ_TOOLS
 from bot.services.admin_ai.values import WRITE_TOOLS, _validate_action_arguments
 from bot.services.admin_ai.write_tools import _action_snapshot, _execute_action
 from bot.services.errors import PermissionDenied, ServiceError, ValidationError
@@ -41,6 +44,11 @@ async def create_plan(
     for action in actions:
         name = str(action.get("name", ""))
         arguments = action.get("arguments")
+        if name in READ_TOOLS:
+            raise ValidationError(
+                "AI попытался использовать read-инструмент внутри action_plan. "
+                "Сначала выполни read_tools, а затем верни action_plan с изменяющими инструментами."
+            )
         if name not in WRITE_TOOLS or not isinstance(arguments, dict):
             raise ValidationError(f"AI запросил неизвестный изменяющий инструмент: {name or 'без имени'}.")
         arguments = normalize_action_arguments(name, arguments)
@@ -58,6 +66,48 @@ async def create_plan(
         warnings=warnings,
         destructive=destructive,
     )
+
+
+ACTION_REF_PATTERN = re.compile(r"^\$action_(\d+)\.(.+)$")
+
+
+def _is_action_reference(value: object) -> bool:
+    return isinstance(value, str) and ACTION_REF_PATTERN.match(value) is not None
+
+
+def _resolve_action_references(value: object, results: list[dict[str, object]]) -> object:
+    if isinstance(value, dict):
+        return {key: _resolve_action_references(item, results) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_action_references(item, results) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_resolve_action_references(item, results) for item in value)
+    if isinstance(value, str):
+        match = ACTION_REF_PATTERN.match(value)
+        if not match:
+            return value
+        action_index = int(match.group(1)) - 1
+        if not 0 <= action_index < len(results):
+            raise ValidationError(
+                f"Ссылка {value} ссылается на недоступное предыдущее действие."
+            )
+        return _resolve_result_path(results[action_index], match.group(2))
+    return value
+
+
+def _resolve_result_path(result: object, path: str) -> object:
+    current = result
+    for part in re.split(r"\.(?![^\[]*\])", path):
+        if isinstance(current, list):
+            raise ValidationError(f"Невозможно разрешить путь {path} в результате списка без индекса.")
+        if "[" in part and part.endswith("]"):
+            name, index_part = part.split("[", 1)
+            index = int(index_part[:-1])
+            current = current[name]
+            current = current[index]
+        else:
+            current = current[part]
+    return current
 
 
 async def confirm_plan(
@@ -102,19 +152,27 @@ async def confirm_plan(
 
     plan.status = "executing"
     plan.confirmed_at = datetime.now(timezone.utc)
-    results = []
+    results: list[dict[str, object]] = []
     async with session.begin_nested():
         for action in plan.actions:
             auth_service.require_admin(admin_vk_id)
-            results.append(
-                await _execute_action(
-                    session,
-                    str(action["name"]),
-                    dict(action["arguments"]),
-                    admin_vk_id=admin_vk_id,
-                    plan_id=plan.id,
-                )
+            action = deepcopy(action)
+            action["arguments"] = _resolve_action_references(
+                action["arguments"], results
             )
+            result = await _execute_action(
+                session,
+                str(action["name"]),
+                dict(action["arguments"]),
+                admin_vk_id=admin_vk_id,
+                plan_id=plan.id,
+            )
+            if isinstance(result, dict):
+                normalized = {**result}
+                normalized.setdefault("message", str(result.get("message", "")))
+            else:
+                normalized = {"message": str(result)}
+            results.append(normalized)
     plan.status = "executed"
     plan.result = {"actions": results}
     plan.executed_at = datetime.now(timezone.utc)
@@ -241,5 +299,6 @@ def _display(value: object) -> str:
 def format_result(plan: AdminAIPlan) -> str:
     results = plan.result.get("actions", [])
     return f"AI-план #{plan.id} выполнен.\n\n" + "\n".join(
-        f"{index}. {result}" for index, result in enumerate(results, start=1)
+        f"{index}. {result['message'] if isinstance(result, dict) else result}"
+        for index, result in enumerate(results, start=1)
     )

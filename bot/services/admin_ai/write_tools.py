@@ -32,6 +32,7 @@ from bot.services.admin_ai.values import (
     _rarity,
     _reject_unknown_fields,
     _text,
+    is_action_reference,
 )
 from bot.services.errors import NotFoundError, ValidationError
 
@@ -98,7 +99,7 @@ async def _action_snapshot(
                 if item.card_id is None
                 and item.display_name.casefold() == expected_name
             ]
-    if "card_id" in arguments:
+    if "card_id" in arguments and not is_action_reference(arguments["card_id"]):
         card = await _card(session, _integer(arguments, "card_id"))
         ownerships = await cards_crud.list_card_ownerships(session, card.id)
         result[f"card:{card.id}"] = _card_data(card) | {
@@ -116,7 +117,7 @@ async def _action_snapshot(
                 for item in ownerships
             ],
         }
-    if "contour_id" in arguments:
+    if "contour_id" in arguments and not is_action_reference(arguments["contour_id"]):
         contour = await contours_crud.get_by_id(session, _integer(arguments, "contour_id"))
         if contour is None:
             raise NotFoundError("Контур не найден.")
@@ -129,7 +130,7 @@ async def _action_snapshot(
             "components": [item.card_ownership_id for item in contour.components],
             **{field: getattr(contour, field) for field in contour_service.EDITABLE_FIELDS},
         }
-    if "ownership_id" in arguments:
+    if "ownership_id" in arguments and not is_action_reference(arguments["ownership_id"]):
         ownership_id = _integer(arguments, "ownership_id")
         ownership = await cards_crud.get_ownership_by_id(session, ownership_id)
         if ownership is None:
@@ -145,7 +146,7 @@ async def _action_snapshot(
                 else None
             ),
         }
-    if "component_id" in arguments:
+    if "component_id" in arguments and not is_action_reference(arguments["component_id"]):
         component_id = _integer(arguments, "component_id")
         component = await contours_crud.get_component(session, component_id)
         if component is None:
@@ -156,7 +157,7 @@ async def _action_snapshot(
             "ownership_id": component.card_ownership_id,
             "position": component.position,
         }
-    if "art_id" in arguments:
+    if "art_id" in arguments and not is_action_reference(arguments["art_id"]):
         art_id = _integer(arguments, "art_id")
         art = await arts_crud.get_by_id(session, art_id)
         if art is None:
@@ -169,7 +170,7 @@ async def _action_snapshot(
             "sha256": art.sha256,
             "storage_key": art.storage_key,
         }
-    if "trophy_id" in arguments:
+    if "trophy_id" in arguments and not is_action_reference(arguments["trophy_id"]):
         trophy_id = _integer(arguments, "trophy_id")
         trophy = await trophies_crud.get_by_id(session, trophy_id)
         if trophy is None:
@@ -183,6 +184,8 @@ async def _action_snapshot(
             "reward": trophy.reward,
         }
     for raw_ownership_id in arguments.get("ownership_ids", []):
+        if isinstance(raw_ownership_id, str) and is_action_reference(raw_ownership_id):
+            continue
         ownership_id = int(raw_ownership_id)
         ownership = await cards_crud.get_ownership_by_id(session, ownership_id)
         if ownership is None:
@@ -342,7 +345,10 @@ async def _execute_action(
             number=_optional_int(arguments.get("number")), description=str(arguments.get("description", "")),
             usage=str(arguments.get("usage", "")), transform_limit=_optional_int(arguments.get("transform_limit")),
         )
-        return f"Создана карта #{item.id} · {item.name}."
+        return {
+            "message": f"Создана карта #{item.id} · {item.name}.",
+            "card_id": item.id,
+        }
     if name == "card_create_and_grant":
         character_id = _integer(arguments, "character_id")
         quantity = int(arguments.get("quantity", 1))
@@ -356,11 +362,16 @@ async def _execute_action(
         ownerships = await card_service.grant_card_copies(
             session, item.id, character_id, quantity=quantity
         )
-        return (
-            f"Создана карта #{item.id} · {item.name} и выдана персонажу "
-            f"#{character_id} в количестве {quantity}; "
-            f"{_ownership_ids_text(ownerships)}."
-        )
+        ownership_ids = [int(getattr(item, "id")) for item in ownerships]
+        return {
+            "message": (
+                f"Создана карта #{item.id} · {item.name} и выдана персонажу "
+                f"#{character_id} в количестве {quantity}; {_ownership_ids_text(ownerships)}."
+            ),
+            "card_id": item.id,
+            "character_id": character_id,
+            "ownership_ids": ownership_ids,
+        }
     if name == "card_update":
         fields = _dict(arguments, "fields")
         _reject_unknown_fields(fields, CARD_UPDATE_FIELDS, "карты")
@@ -377,7 +388,13 @@ async def _execute_action(
             _integer(arguments, "character_id"),
             quantity=quantity,
         )
-        return f"Выдано карт: {quantity}; {_ownership_ids_text(items)}."
+        ownership_ids = [int(getattr(item, "id")) for item in items]
+        return {
+            "message": f"Выдано карт: {quantity}; {_ownership_ids_text(items)}.",
+            "card_id": _integer(arguments, "card_id"),
+            "character_id": _integer(arguments, "character_id"),
+            "ownership_ids": ownership_ids,
+        }
     if name == "card_revoke":
         quantity = int(arguments.get("quantity", 1))
         await card_service.revoke_card_copies(
@@ -395,7 +412,12 @@ async def _execute_action(
             description=str(arguments.get("description", "")), usage=str(arguments.get("usage", "")),
             quantity=quantity,
         )
-        return f"Добавлено Обычных карт: {quantity}; {_ownership_ids_text(items)}."
+        ownership_ids = [int(getattr(item, "id")) for item in items]
+        return {
+            "message": f"Добавлено Обычных карт: {quantity}; {_ownership_ids_text(items)}.",
+            "character_id": _integer(arguments, "character_id"),
+            "ownership_ids": ownership_ids,
+        }
     if name == "ordinary_card_revoke":
         character_id = _integer(arguments, "character_id")
         if arguments.get("ownership_id") not in (None, ""):

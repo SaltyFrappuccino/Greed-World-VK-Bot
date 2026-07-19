@@ -21,7 +21,7 @@ from bot.services.errors import ServiceError, ValidationError
 from bot.utils.formatters import vk_plain_text
 
 MAX_TOOL_ROUNDS = 10
-MAX_IDENTICAL_PLAN_REJECTIONS = 2
+MAX_IDENTICAL_PLAN_REJECTIONS = 3
 logger = logging.getLogger("zhadny_mir.ai_agent")
 
 

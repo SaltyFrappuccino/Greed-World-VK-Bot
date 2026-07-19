@@ -109,3 +109,26 @@ def test_card_create_and_grant_normalizes_short_contour_kind() -> None:
             "rarity": "H",
         },
     )
+
+
+def test_card_create_and_grant_allows_contour_kind_as_form_or_effect() -> None:
+    _validate_action_arguments(
+        "card_create_and_grant",
+        {
+            "character_id": 7,
+            "name": "Руна",
+            "card_type": "Контурная",
+            "kind": "Форма",
+            "rarity": "H",
+        },
+    )
+    _validate_action_arguments(
+        "card_create_and_grant",
+        {
+            "character_id": 7,
+            "name": "Связь",
+            "card_type": "Контурная",
+            "kind": "Эффект",
+            "rarity": "H",
+        },
+    )

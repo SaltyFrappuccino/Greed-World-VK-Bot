@@ -53,7 +53,7 @@ async def generate_card(source: str, card_type: CardType) -> CardDraft:
     draft = CardDraft.model_validate(data)
     if not draft.name.strip():
         raise ValidationError("AI не смог определить название карты.")
-    if card_type is CardType.CONTOUR and draft.kind not in CONTOUR_SUBTYPES:
+    if card_type is CardType.CONTOUR and draft.kind not in CONTOUR_SUBTYPES and draft.kind not in {"Форма", "Эффект"}:
         raise ValidationError(
             "AI вернул неизвестный подтип Контурной карты. Попробуйте уточнить форму или эффект."
         )

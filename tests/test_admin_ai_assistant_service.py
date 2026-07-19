@@ -704,6 +704,68 @@ async def test_agent_repairs_text_vk_name_used_as_character_id(session, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_agent_recovers_from_read_tool_misuse_in_plan(session, monkeypatch):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    turns = iter(
+        [
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Сначала посмотрю данные",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="query_database",
+                        arguments={"entity": "characters"},
+                        description="Запросить данные из базы",
+                    )
+                ],
+            ),
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Сначала посмотрю данные",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="query_database",
+                        arguments={"entity": "characters"},
+                        description="Запросить данные из базы",
+                    )
+                ],
+            ),
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="Создам анкету",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="character_create",
+                        arguments={
+                            "vk_id": 485208149,
+                            "name": "Пикколо",
+                        },
+                        description="Создать анкету Пикколо",
+                    )
+                ],
+            ),
+        ]
+    )
+
+    async def fake_turn(*_args, **_kwargs):
+        return next(turns)
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", fake_turn)
+    outcome = await service.process_message(
+        session,
+        session_id=ai_session.id,
+        admin_vk_id=500,
+        peer_id=500,
+        text="Создай анкету",
+    )
+
+    assert outcome.plan is not None
+    assert outcome.plan.actions[0]["name"] == "character_create"
+
+
+@pytest.mark.asyncio
 async def test_agent_stops_after_same_invalid_plan_twice(session, monkeypatch):
     ai_session = await service.open_session(
         session, admin_vk_id=500, peer_id=500
@@ -810,6 +872,84 @@ async def test_agent_recovers_from_typo_and_plans_card_creation_with_grant(
     assert plan.status == "executed"
     assert card is not None
     assert [item.card_id for item in ownerships] == [card.id]
+
+
+@pytest.mark.asyncio
+async def test_agent_can_use_previous_action_ownership_id_in_plan(session, monkeypatch):
+    ai_session, character = await _session_and_character(session)
+
+    turns = iter(
+        [
+            ai_service.AdminAssistantTurn(
+                kind="action_plan",
+                message="План с привязкой только что выданной карты",
+                actions=[
+                    ai_service.AssistantAction(
+                        name="card_create_and_grant",
+                        arguments={
+                            "character_id": character.id,
+                            "name": "Снаряд",
+                            "card_type": "Контурная",
+                            "kind": "Снаряд",
+                            "rarity": "B",
+                            "description": "Контурная карта Снаряд.",
+                            "usage": "Активируется в Контуре.",
+                            "quantity": 1,
+                        },
+                        description="Создать и выдать карту Снаряд",
+                    ),
+                    ai_service.AssistantAction(
+                        name="card_create_and_grant",
+                        arguments={
+                            "character_id": character.id,
+                            "name": "Барьер",
+                            "card_type": "Контурная",
+                            "kind": "Барьер",
+                            "rarity": "B",
+                            "description": "Контурная карта Барьер.",
+                            "usage": "Активируется в Контуре.",
+                            "quantity": 1,
+                        },
+                        description="Создать и выдать карту Барьер",
+                    ),
+                    ai_service.AssistantAction(
+                        name="contour_create",
+                        arguments={
+                            "character_id": character.id,
+                            "ownership_ids": [
+                                "$action_1.ownership_ids[0]",
+                                "$action_2.ownership_ids[0]",
+                            ],
+                            "name": "Снарядный Хлеб",
+                        },
+                        description="Создать Контур с только что выданными картами",
+                    ),
+                ],
+            )
+        ]
+    )
+
+    async def fake_turn(*_args, **_kwargs):
+        return next(turns)
+
+    monkeypatch.setattr(ai_service, "generate_admin_assistant_turn", fake_turn)
+    outcome = await service.process_message(
+        session,
+        session_id=ai_session.id,
+        admin_vk_id=500,
+        peer_id=500,
+        text="Собери Контур из только что выданной карты.",
+    )
+
+    assert outcome.plan is not None
+    plan, executed = await service.confirm_plan(
+        session,
+        plan_id=outcome.plan.id,
+        admin_vk_id=500,
+        peer_id=500,
+    )
+    assert executed is True
+    assert plan.status == "executed"
 
 
 @pytest.mark.asyncio

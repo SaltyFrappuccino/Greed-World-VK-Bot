@@ -104,6 +104,7 @@ async def test_admin_assistant_uses_json_mode_without_native_tools(monkeypatch, 
     assert "Каждый изменившийся стат записывай отдельным character_set_stat" in system_prompt
     assert "При images=0 не создавай character_art_add" in system_prompt
     assert "Не повторяй прежние аргументы" in system_prompt
+    assert "Не выдумывай ownership_id" in system_prompt
     assert "Пример:" not in system_prompt
     assert "request.start request_id=test-request round=1" in caplog.text
     assert "request.done request_id=test-request round=1" in caplog.text

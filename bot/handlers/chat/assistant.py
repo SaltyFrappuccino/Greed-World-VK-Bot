@@ -280,8 +280,9 @@ async def _upload_attachments(message: Message, items) -> list[tuple[str, str, s
                 message.ctx_api, message.peer_id, item.data, filename=item.filename
             )
         else:
-            uploader = DocMessagesUploader(message.ctx_api, attachment_name=item.filename)
-            attachment = await uploader.upload(item.data, peer_id=message.peer_id, title=item.filename)
+            attachment = await upload_message_doc(
+                message.ctx_api, message.peer_id, item.data, filename=item.filename
+            )
         result.append((item.kind, attachment, item.filename))
     return result
 

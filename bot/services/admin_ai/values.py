@@ -1,3 +1,4 @@
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import cards as cards_crud
@@ -118,6 +119,13 @@ def _card_data(item: Card) -> dict[str, object]:
     }
 
 
+ACTION_REF_PATTERN = re.compile(r"^\$action_(\d+)\.(.+)$")
+
+
+def is_action_reference(value: object) -> bool:
+    return isinstance(value, str) and ACTION_REF_PATTERN.match(value) is not None
+
+
 def _text(arguments: dict[str, object], key: str) -> str:
     value = str(arguments.get(key, "")).strip()
     if not value:
@@ -189,6 +197,9 @@ def _normalize_card_kind(card_type: CardType, kind: object) -> str:
             short_normalized = parts[1]
     if short_normalized in short_matches:
         return short_matches[short_normalized]
+
+    if short_normalized in {"форма", "эффект"}:
+        return short_normalized.capitalize()
 
     return raw
 
@@ -281,12 +292,17 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
         "component_id", "art_id", "trophy_id", "comment_id", "owner_vk_id",
     ):
         if key in arguments and arguments[key] not in (None, ""):
+            value = arguments[key]
+            if isinstance(value, str) and is_action_reference(value):
+                continue
             _integer(arguments, key)
     ownership_ids = arguments.get("ownership_ids")
     if ownership_ids is not None:
         if not isinstance(ownership_ids, list):
             raise ValidationError("Поле ownership_ids должно быть списком числовых ID.")
         for value in ownership_ids:
+            if isinstance(value, str) and is_action_reference(value):
+                continue
             try:
                 if int(value) <= 0:
                     raise ValueError
@@ -371,7 +387,7 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
         raise ValidationError("Лимит преобразований допустим только для Особой карты.")
     if transform_limit is not None and transform_limit < 1:
         raise ValidationError("Лимит преобразований должен быть больше нуля.")
-    if card_type is CardType.CONTOUR and kind not in CONTOUR_SUBTYPES:
+    if card_type is CardType.CONTOUR and kind not in CONTOUR_SUBTYPES and kind not in {"Форма", "Эффект"}:
         raise ValidationError(
             "Контурной карте нужен системный подтип из списка форм или эффектов."
         )
