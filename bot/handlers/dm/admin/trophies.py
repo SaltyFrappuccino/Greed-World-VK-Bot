@@ -9,6 +9,7 @@ from bot.services import trophy_service
 from bot.services.errors import ServiceError
 from bot.states import AdminTrophyState, clear_state, state_dispenser
 from bot.utils.formatters import format_trophies
+from bot.utils.messages import answer_long
 from bot.utils.validators import parse_positive_int
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False), AdminRule()])
@@ -59,7 +60,8 @@ async def save_award(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Трофей выдан.\n\n" + format_trophies([trophy]),
         keyboard=character_trophies_menu(character_id, is_admin=True),
     )

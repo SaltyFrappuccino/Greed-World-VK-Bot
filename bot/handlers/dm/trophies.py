@@ -9,6 +9,7 @@ from bot.keyboards.main_menu import back_to_menu, cancel
 from bot.services.errors import ServiceError
 from bot.states import clear_state
 from bot.utils.formatters import format_trophies
+from bot.utils.messages import answer_long
 from bot.utils.validators import parse_positive_int
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=False)])
@@ -32,8 +33,8 @@ async def show_trophies(
         await message.answer(str(error), keyboard=back_to_menu())
         return
     await clear_state(message.peer_id)
-    await message.answer(
-        f"🏆 Трофеи персонажа #{character.id} · {character.name}\n\n"
-        + format_trophies(trophies),
+    await answer_long(
+        message,
+        f"🏆 Трофеи персонажа #{character.id} · {character.name}\n\n" + format_trophies(trophies),
         keyboard=character_trophies_menu(character.id, is_admin=is_admin),
     )

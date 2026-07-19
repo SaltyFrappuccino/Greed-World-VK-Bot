@@ -11,6 +11,7 @@ from bot.services import contour_service
 from bot.services.errors import ServiceError
 from bot.states import clear_state
 from bot.utils import formatters
+from bot.utils.messages import answer_long
 from bot.utils.pagination import normalize_page
 from bot.utils.validators import parse_positive_int
 
@@ -74,8 +75,8 @@ async def show_contour(
         return
 
     await clear_state(message.peer_id)
-    await message.answer(
-        text, keyboard=contour_detail_menu(contour, is_admin=is_admin)
+    await answer_long(
+        message, text, keyboard=contour_detail_menu(contour, is_admin=is_admin)
     )
 
 

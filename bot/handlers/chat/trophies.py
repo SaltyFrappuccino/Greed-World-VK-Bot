@@ -9,6 +9,7 @@ from bot.middlewares.auth import AdminRule
 from bot.services import character_service, trophy_service
 from bot.services.errors import ServiceError, ValidationError
 from bot.utils.formatters import format_trophies
+from bot.utils.messages import answer_long
 from bot.utils.validators import extract_vk_id, parse_positive_int
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=True)])
@@ -84,9 +85,9 @@ async def award_trophy(message: Message, args: str, **_: object) -> None:
     except ServiceError as error:
         await message.answer(str(error))
         return
-    await message.answer(
-        f"Трофей выдан персонажу #{character.id} · {character.name}.\n\n"
-        + format_trophies([trophy])
+    await answer_long(
+        message,
+        f"Трофей выдан персонажу #{character.id} · {character.name}.\n\n" + format_trophies([trophy]),
     )
 
 
@@ -132,9 +133,9 @@ async def delete_trophy(message: Message, args: str, **_: object) -> None:
     except ServiceError as error:
         await message.answer(str(error))
         return
-    await message.answer(
-        f"Трофей удалён #{deleted.id} · {deleted.name} (персонаж #{character.id} · {character.name}).\n\n"
-        + format_trophies([deleted])
+    await answer_long(
+        message,
+        f"Трофей удалён #{deleted.id} · {deleted.name} (персонаж #{character.id} · {character.name}).\n\n" + format_trophies([deleted]),
     )
 
 
@@ -146,7 +147,8 @@ async def _show_for_vk(message: Message, vk_id: int, *, query: str = "") -> None
     except ServiceError as error:
         await message.answer(str(error))
         return
-    await message.answer(
+    await answer_long(
+        message,
         f"🏆 Трофеи персонажа #{character.id} · {character.name}\n\n"
         + (
             "".join(
@@ -155,7 +157,7 @@ async def _show_for_vk(message: Message, vk_id: int, *, query: str = "") -> None
             )
         )
         + "\n\n"
-        + format_trophies(trophies)
+        + format_trophies(trophies),
     )
 
 

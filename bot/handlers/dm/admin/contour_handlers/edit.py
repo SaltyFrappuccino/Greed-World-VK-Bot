@@ -21,6 +21,7 @@ from bot.keyboards.admin_menu import (
 from bot.keyboards.main_menu import cancel, contour_detail_menu
 from bot.middlewares.auth import AdminRule
 from bot.services import ai_service, contour_service
+from bot.utils.messages import answer_long
 from bot.services.contour_template_service import (
     CONTOUR_TEMPLATE,
     FIELDS,
@@ -104,9 +105,8 @@ async def show_components(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=back_to_admin_characters())
         return
     await clear_state(message.peer_id)
-    await message.answer(
-        formatters.format_contour(contour),
-        keyboard=contour_components_actions_menu(contour),
+    await answer_long(
+        message, formatters.format_contour(contour), keyboard=contour_components_actions_menu(contour)
     )
 
 
@@ -152,7 +152,8 @@ async def add_card_select(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Карта добавлена.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )
@@ -178,7 +179,8 @@ async def remove_card(message: Message, **_: object) -> None:
     except ServiceError as error:
         await message.answer(str(error), keyboard=back_to_admin_characters())
         return
-    await message.answer(
+    await answer_long(
+        message,
         "Карта освобождена.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )
@@ -241,7 +243,8 @@ async def replace_card_select(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Карта заменена.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )
@@ -302,7 +305,8 @@ async def generate_ai(message: Message, **_: object) -> None:
         **state.payload,
         draft=draft.model_dump(),
     )
-    await message.answer(
+    await answer_long(
+        message,
         ai_service.contour_preview(draft)
         + "\n\nСостав останется без изменений:\n"
         + state.payload["card_context"],
@@ -334,7 +338,8 @@ async def confirm_ai(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Контур сохранён.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )

@@ -29,6 +29,7 @@ from bot.services.contour_template_service import (
 from bot.services.errors import ServiceError, ValidationError
 from bot.states import AdminContourState, clear_state, state_dispenser
 from bot.utils import formatters
+from bot.utils.messages import answer_long
 from bot.utils.pagination import normalize_page
 from bot.utils.validators import parse_positive_int
 from bot.handlers.dm.admin.contour_handlers.routing import labeler
@@ -82,7 +83,8 @@ async def collect_manual_field(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Контур создан.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )
@@ -100,7 +102,8 @@ async def save_template(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Контур создан.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )
@@ -167,7 +170,8 @@ async def save_field(message: Message, **_: object) -> None:
         await message.answer(str(error), keyboard=cancel())
         return
     await clear_state(message.peer_id)
-    await message.answer(
+    await answer_long(
+        message,
         "Поле обновлено.\n\n" + formatters.format_contour(contour),
         keyboard=contour_detail_menu(contour, is_admin=True),
     )
