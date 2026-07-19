@@ -96,3 +96,16 @@ def test_character_update_stat_error_explains_correct_actions() -> None:
     assert '"stat":"will","value":4' in message
     assert '"stat":"scent","value":5' in message
     assert "Допустимые fields" in message
+
+
+def test_card_create_and_grant_normalizes_short_contour_kind() -> None:
+    _validate_action_arguments(
+        "card_create_and_grant",
+        {
+            "character_id": 7,
+            "name": "Стрекоза",
+            "card_type": "Контурная",
+            "kind": "Снаряд",
+            "rarity": "H",
+        },
+    )

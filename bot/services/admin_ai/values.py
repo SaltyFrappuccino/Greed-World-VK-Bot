@@ -166,6 +166,33 @@ def _card_type(value: object) -> CardType:
     raise ValidationError("Неизвестный тип карты.")
 
 
+def _normalize_card_kind(card_type: CardType, kind: object) -> str:
+    raw = str(kind or "").strip()
+    if card_type is not CardType.CONTOUR:
+        return raw
+
+    normalized = raw.casefold().replace("–", "-").replace("—", "-")
+    exact_matches = {
+        item.casefold(): item for item in CONTOUR_SUBTYPES
+    }
+    if normalized in exact_matches:
+        return exact_matches[normalized]
+
+    short_matches = {
+        item.split("—", 1)[1].strip().casefold(): item
+        for item in CONTOUR_SUBTYPES
+    }
+    short_normalized = normalized
+    if short_normalized.startswith("форма") or short_normalized.startswith("эффект"):
+        parts = [part.strip() for part in short_normalized.split("-", 1)]
+        if len(parts) == 2:
+            short_normalized = parts[1]
+    if short_normalized in short_matches:
+        return short_matches[short_normalized]
+
+    return raw
+
+
 def _normalize_card_fields(fields: dict[str, object]) -> dict[str, object]:
     if "rarity" in fields:
         fields["rarity"] = _rarity(fields["rarity"])
@@ -325,7 +352,8 @@ def _validate_action_arguments(name: str, arguments: dict[str, object]) -> None:
 
     card_type = _card_type(arguments["card_type"])
     _rarity(arguments["rarity"])
-    kind = str(arguments["kind"]).strip()
+    kind = _normalize_card_kind(card_type, arguments["kind"])
+    arguments["kind"] = kind
     if card_type is CardType.ORDINARY:
         raise ValidationError(
             "Обычная карта не создаётся в реестре: используй ordinary_card_grant."

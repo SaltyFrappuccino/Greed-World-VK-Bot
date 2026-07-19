@@ -69,7 +69,14 @@ class Settings(BaseSettings):
     @classmethod
     def _split_admin_ids(cls, value: object) -> object:
         if isinstance(value, str):
-            return [chunk.strip() for chunk in value.split(",") if chunk.strip()]
+            result: list[int] = []
+            for chunk in (chunk.strip() for chunk in value.split(",") if chunk.strip()):
+                try:
+                    result.append(int(chunk))
+                except Exception:
+                    # ignore bad values but keep parsing
+                    continue
+            return result
         return value
 
     @property
