@@ -8,11 +8,13 @@ from bot.logging_config import configure_logging
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.states import state_dispenser
+from bot.vkbottle_compat import ensure_runner_logger_compatibility
 
 
 def create_bot() -> Bot:
     settings = get_settings()
     configure_logging(settings)
+    ensure_runner_logger_compatibility()
 
     bot = Bot(token=settings.vk_community_token, state_dispenser=state_dispenser)
     bot.labeler.message_view.register_middleware(LoggingMiddleware)
@@ -32,7 +34,7 @@ def create_bot() -> Bot:
 
 
 def main() -> None:
-    create_bot().run_forever()
+    create_bot().run()
 
 
 if __name__ == "__main__":
