@@ -9,7 +9,7 @@ from bot.middlewares.auth import AdminRule
 from bot.services import character_service, trophy_service
 from bot.services.errors import ServiceError, ValidationError
 from bot.utils.formatters import format_trophies
-from bot.utils.validators import extract_vk_id
+from bot.utils.validators import extract_vk_id, parse_positive_int
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=True)])
 labeler.vbml_ignore_case = True
@@ -92,6 +92,57 @@ async def award_trophy(message: Message, args: str, **_: object) -> None:
     )
 
 
+@admin_labeler.message(text="?удалитьтрофей")
+async def delete_without_arguments(message: Message, **_: object) -> None:
+    await message.answer(
+        "Формат:\n?удалитьтрофей @игрок|id или #ID_анкеты номер_трофея\n"
+        "Примеры:\n?удалитьтрофей [id123|Пользователь] 2\n?удалитьтрофей #45 1"
+    )
+
+
+@admin_labeler.message(text="?удалитьтрофей <args>")
+async def delete_trophy(message: Message, args: str, **_: object) -> None:
+    # Expect: <target> <index>
+    m = re.match(r"^\s*(\[[^\]]+\]|#?\d+|\S+)\s+(\d+)\s*$", args)
+    if not m:
+        await message.answer(
+            "Неверный формат.\n\nФормат: ?удалитьтрофей @игрок|id или #ID_анкеты номер_трофея"
+        )
+        return
+    target = m.group(1).strip()
+    index = int(m.group(2))
+
+    try:
+        async with get_session() as session:
+            # Resolve character: if a VK mention, resolve by VK id and use existing logic
+            if extract_vk_id(target) is not None:
+                vk_id = extract_vk_id(target)
+                character = await _resolve_mentioned_character(session, vk_id, target)
+            else:
+                # treat target as character query like "#123" or numeric id
+                character = await character_service.find_character(session, target)
+
+            trophies = await trophies_crud.list_for_character(session, character.id)
+            if not trophies:
+                raise ValidationError("У персонажа нет трофеев.")
+            if index <= 0 or index > len(trophies):
+                raise ValidationError(
+                    f"Неверный номер трофея. У персонажа {len(trophies)} трофеев."
+                )
+            trophy = trophies[index - 1]
+
+            deleted = await trophy_service.remove(
+                session, trophy_id=trophy.id, admin_vk_id=message.from_id
+            )
+    except ServiceError as error:
+        await message.answer(str(error))
+        return
+    await message.answer(
+        f"Трофей удалён #{deleted.id} · {deleted.name} (персонаж #{character.id} · {character.name}).\n\n"
+        + format_trophies([deleted])
+    )
+
+
 async def _show_for_vk(message: Message, vk_id: int, *, query: str = "") -> None:
     try:
         async with get_session() as session:
@@ -102,6 +153,13 @@ async def _show_for_vk(message: Message, vk_id: int, *, query: str = "") -> None
         return
     await message.answer(
         f"🏆 Трофеи персонажа #{character.id} · {character.name}\n\n"
+        + (
+            "".join(
+                f"{i+1}. {('🥉' if t.rank.name=='BRONZE' else '🥈' if t.rank.name=='SILVER' else '🥇')} {t.name} — {t.rank.value}\n"
+                for i, t in enumerate(trophies)
+            )
+        )
+        + "\n\n"
         + format_trophies(trophies)
     )
 
