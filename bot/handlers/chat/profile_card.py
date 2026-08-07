@@ -52,6 +52,15 @@ async def _send_profile_card(message: Message, character_id: int) -> None:
         async with get_session() as session:
             result = await profile_card_service.get_or_create(session, character_id)
         attachment = result.cache.vk_attachment
+        logger.info(
+            "profile_card.ready character_id=%s peer_id=%s reused=%s "
+            "cached_attachment=%s generated_bytes=%s",
+            character_id,
+            message.peer_id,
+            result.reused,
+            bool(attachment),
+            len(result.data) if result.data is not None else None,
+        )
         if not attachment:
             data = result.data or read_bytes(result.cache.storage_key)
             attachment = await upload_message_photo(
@@ -60,6 +69,7 @@ async def _send_profile_card(message: Message, character_id: int) -> None:
                 data,
                 filename=f"profile_card_{character_id}.png",
                 content_type="image/png",
+                log_context=f"profile_card:{character_id}",
             )
             async with get_session() as session:
                 await profile_card_service.remember_vk_attachment(
@@ -69,6 +79,15 @@ async def _send_profile_card(message: Message, character_id: int) -> None:
                     attachment=attachment,
                 )
     except ServiceError as error:
+        logger.warning(
+            "profile_card.send_failed character_id=%s peer_id=%s error_type=%s "
+            "error=%s",
+            character_id,
+            message.peer_id,
+            type(error).__name__,
+            error,
+            exc_info=True,
+        )
         await message.answer(str(error))
         return
     except Exception:
@@ -80,6 +99,12 @@ async def _send_profile_card(message: Message, character_id: int) -> None:
     await message.answer(
         f"Визитка персонажа #{character_id} · {result.character_name}",
         attachment=attachment,
+    )
+    logger.info(
+        "profile_card.sent character_id=%s peer_id=%s reused=%s",
+        character_id,
+        message.peer_id,
+        result.reused,
     )
 
 
