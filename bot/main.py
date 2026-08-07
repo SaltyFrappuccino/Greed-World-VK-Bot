@@ -1,6 +1,7 @@
 from vkbottle.bot import Bot
 
 from bot.config import get_settings
+from bot.database.schema import upgrade_and_verify_schema
 from bot.handlers.chat import labelers as chat_labelers
 from bot.handlers.dm import control_labeler, fallback_labeler, labelers as dm_labelers
 from bot.handlers.dm.admin import labelers as admin_labelers
@@ -32,6 +33,10 @@ def create_bot() -> Bot:
 
 
 def main() -> None:
+    settings = get_settings()
+    configure_logging(settings)
+    ensure_runner_logger_compatibility()
+    upgrade_and_verify_schema(settings)
     create_bot().run()
 
 

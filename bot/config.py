@@ -104,13 +104,32 @@ class Settings(BaseSettings):
         return value
 
     @property
+    def resolved_database_url(self) -> str:
+        return resolve_database_url(self.database_url, self.data_dir)
+
+    @property
+    def migration_database_url(self) -> str:
+        """Синхронный DATABASE_URL для Alembic и проверки схемы."""
+        database_url = self.resolved_database_url
+        scheme, _, rest = database_url.partition("://")
+        if "+" in scheme:
+            if scheme == "sqlite+aiosqlite":
+                return f"sqlite://{rest}"
+            if scheme == "postgresql+asyncpg":
+                return f"postgresql+psycopg://{rest}"
+            return database_url
+        if scheme in {"postgres", "postgresql"}:
+            return f"postgresql+psycopg://{rest}"
+        return database_url
+
+    @property
     def async_database_url(self) -> str:
         """DATABASE_URL с async-драйвером.
 
         В .env лежит обычная синхронная строка (так её понимают alembic и
         внешние инструменты), а движок бота работает асинхронно.
         """
-        database_url = resolve_database_url(self.database_url, self.data_dir)
+        database_url = self.resolved_database_url
         scheme, _, rest = database_url.partition("://")
         if "+" in scheme:
             return database_url

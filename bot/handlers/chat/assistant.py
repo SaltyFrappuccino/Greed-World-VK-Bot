@@ -1,26 +1,22 @@
+import json
+import logging
+
 from vkbottle import DocMessagesUploader, Keyboard, KeyboardButtonColor, Text
 from vkbottle.bot import BotLabeler, Message
 from vkbottle.dispatch.rules.base import PeerRule
 
-import json
-
+from bot.config import get_settings
 from bot.database.engine import get_session
 from bot.middlewares.auth import AdminRule, NotAdminRule
-from bot.keyboards.main_menu import cancel, main_menu
-from bot.services import admin_ai_assistant_service as assistant_service, vk_service
-from bot.config import get_settings
+from bot.services import admin_ai_assistant_service as assistant_service
+from bot.services import vk_service
 from bot.services.errors import ServiceError
 from bot.states import AdminAssistantState, clear_state, state_dispenser
 from bot.utils.messages import answer_long
 from bot.utils.photos import upload_message_photo
 from bot.utils.validators import extract_vk_profile_urls
-import logging
 
 logger = logging.getLogger("zhadny_mir.chat_assistant")
-try:
-    logger.info("assistant.configured.admins=%s", get_settings().admin_vk_ids)
-except Exception:
-    logger.exception("failed to read configured admin ids")
 
 labeler = BotLabeler(auto_rules=[PeerRule(from_chat=True), AdminRule()])
 labeler.vbml_ignore_case = True
@@ -63,12 +59,17 @@ async def stop_assistant(message: Message, **_: object) -> None:
         await message.answer("Требуются права администратора.")
         return
     try:
+        current_state = await state_dispenser.get(message.peer_id)
+        session_id = int(current_state.payload.get("session_id", 0)) if current_state else 0
         async with get_session() as session:
             await assistant_service.close_session(
-                session, session_id=int((await state_dispenser.get(message.peer_id)).payload.get("session_id", 0)), admin_vk_id=message.from_id, peer_id=message.peer_id
+                session,
+                session_id=session_id,
+                admin_vk_id=message.from_id,
+                peer_id=message.peer_id,
             )
-    except Exception:
-        pass
+    except ServiceError as error:
+        logger.warning("assistant.session.close_failed error=%s", error)
     await clear_state(message.peer_id)
     await message.answer("Ассистент остановлен.")
 
@@ -84,10 +85,7 @@ async def start_assistant_with_query(message: Message, query: str, **_: object) 
             session, admin_vk_id=message.from_id, peer_id=message.peer_id
         )
     await state_dispenser.set(message.peer_id, AdminAssistantState.CHAT, session_id=ai_session.id)
-    # Inform user briefly and process the query
-    await message.answer("Ассистент запущен. Обрабатываю запрос…")
-    session_state = await state_dispenser.get(message.peer_id)
-    session_id = int(session_state.payload.get("session_id", 0))
+    session_id = ai_session.id
     logger.info("assistant.immediate.start peer=%s admin=%s session=%s query_len=%s", message.peer_id, message.from_id, ai_session.id, len(query))
     try:
         async with get_session() as session:
@@ -127,18 +125,6 @@ async def start_assistant_with_query(message: Message, query: str, **_: object) 
     for kind, attachment, filename in attachments:
         title = "Основной арт персонажа." if kind == "photo" else f"Файл: {filename}"
         await message.answer(title, attachment=attachment)
-    try:
-        async with get_session() as session:
-            await assistant_service.close_session(
-                session,
-                session_id=int((await state_dispenser.get(message.peer_id)).payload.get("session_id", 0)),
-                admin_vk_id=message.from_id,
-                peer_id=message.peer_id,
-            )
-    except Exception:
-        pass
-    await clear_state(message.peer_id)
-    await message.answer("Ассистент остановлен.")
 
 
 @labeler.message(payload_contains={"cmd": "chat_assistant_plan_confirm"})
@@ -188,12 +174,33 @@ def _parsed_payload(payload: str | dict[str, object] | None) -> dict[str, object
 
 
 @labeler.message(state=AdminAssistantState.CHAT)
+@labeler.message(state=AdminAssistantState.PLAN_CONFIRM)
+@labeler.message(state=AdminAssistantState.DESTRUCTIVE_CONFIRM)
 async def chat(message: Message, **_: object) -> None:
     state = await state_dispenser.get(message.peer_id)
     if state is None:
         await message.answer("Сессия устарела. Запусти ?ассистент ещё раз.")
         return
     session_id = int(state.payload.get("session_id", 0))
+    pending_plan_id = state.payload.get("plan_id")
+    if pending_plan_id is not None:
+        try:
+            async with get_session() as session:
+                await assistant_service.cancel_plan(
+                    session,
+                    plan_id=int(pending_plan_id),
+                    admin_vk_id=message.from_id,
+                    peer_id=message.peer_id,
+                )
+        except ServiceError:
+            logger.warning(
+                "assistant.chat.pending_plan_cancel_failed plan_id=%s",
+                pending_plan_id,
+                exc_info=True,
+            )
+        await state_dispenser.set(
+            message.peer_id, AdminAssistantState.CHAT, session_id=session_id
+        )
     try:
         async with get_session() as session:
             outcome = await assistant_service.process_message(
@@ -207,9 +214,16 @@ async def chat(message: Message, **_: object) -> None:
             )
             attachments = await _upload_attachments(message, outcome.attachments)
     except ServiceError as error:
+        logger.warning("assistant.chat.service_error error=%s", error, exc_info=True)
         await message.answer(str(error))
         return
     except Exception:
+        logger.exception(
+            "assistant.chat.unhandled peer=%s admin=%s session=%s",
+            message.peer_id,
+            message.from_id,
+            session_id,
+        )
         await message.answer("Ассистент не смог обработать запрос.")
         return
 
@@ -243,12 +257,21 @@ async def _confirm_chat_plan(message: Message, *, destructive: bool, plan_id: in
         await message.answer(f"План не выполнен: {error}")
         return
     if not executed:
+        await state_dispenser.set(
+            message.peer_id,
+            AdminAssistantState.DESTRUCTIVE_CONFIRM,
+            session_id=plan.session_id,
+            plan_id=plan.id,
+        )
         await message.answer(
             "⚠ План содержит необратимое удаление. Нажми кнопку ниже, чтобы подтвердить удаление.",
             keyboard=_plan_destructive_confirmation_keyboard(plan.id),
         )
         return
-    await message.answer("План подтверждён и выполнен.")
+    await state_dispenser.set(
+        message.peer_id, AdminAssistantState.CHAT, session_id=plan.session_id
+    )
+    await answer_long(message, assistant_service.format_result(plan))
 
 
 def _plan_confirmation_keyboard(plan_id: int) -> str:
@@ -280,8 +303,13 @@ async def _upload_attachments(message: Message, items) -> list[tuple[str, str, s
                 message.ctx_api, message.peer_id, item.data, filename=item.filename
             )
         else:
-            attachment = await upload_message_doc(
-                message.ctx_api, message.peer_id, item.data, filename=item.filename
+            uploader = DocMessagesUploader(
+                message.ctx_api, attachment_name=item.filename
+            )
+            attachment = await uploader.upload(
+                item.data,
+                peer_id=message.peer_id,
+                title=item.filename,
             )
         result.append((item.kind, attachment, item.filename))
     return result

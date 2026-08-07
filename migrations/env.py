@@ -9,16 +9,19 @@ from bot.config import resolve_database_url
 from bot.database.models import Base
 
 config = context.config
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get(
+    "configure_logger", True
+):
     fileConfig(config.config_file_name)
 
 load_dotenv()
+database_url = config.attributes.get("database_url") or resolve_database_url(
+    os.getenv("DATABASE_URL", "sqlite:///./zhadny_mir.db"),
+    os.getenv("DATA_DIR"),
+)
 config.set_main_option(
     "sqlalchemy.url",
-    resolve_database_url(
-        os.getenv("DATABASE_URL", "sqlite:///./zhadny_mir.db"),
-        os.getenv("DATA_DIR"),
-    ).replace("%", "%%"),
+    database_url.replace("%", "%%"),
 )
 target_metadata = Base.metadata
 
