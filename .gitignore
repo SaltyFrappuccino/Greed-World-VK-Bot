@@ -3,8 +3,7 @@
 *.db-journal
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.pytest_tmp_*/
+.pytest*/
 .venv/
 venv/
 .idea/
