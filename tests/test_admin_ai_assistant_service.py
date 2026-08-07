@@ -2,11 +2,14 @@ import pytest
 from types import SimpleNamespace
 
 from bot.database.crud import cards as cards_crud
+from bot.database.crud import admin_ai as admin_ai_crud
 from bot.database.crud import characters as characters_crud
 from bot.database.models import CharacterArt
 from bot.services import ai_service
 from bot.services import admin_ai_assistant_service as service
-from bot.services.admin_ai import read_tools, write_tools
+from bot.services.admin_ai import read_tools, sessions, write_tools
+from bot.services.admin_ai.planning import format_plan
+from bot.services.content_ai.contracts import CharacterDraft
 from bot.services.errors import ValidationError
 from bot.services.errors import PermissionDenied
 from bot.services.vk_discussion_service import (
@@ -196,6 +199,185 @@ async def test_discussion_import_is_planned_then_creates_approved_character(
     assert character.source_comment_hash == "a" * 64
     assert added_arts[0]["vk_attachment"] == "photo485208149_9_key"
     assert added_arts[0]["make_primary"] is True
+
+
+@pytest.mark.asyncio
+async def test_discussion_applications_are_analyzed_as_one_batch(session, monkeypatch):
+    applications = {
+        comment_id: DiscussionApplication(
+            group_id=240214251,
+            topic_id=68811646,
+            comment_id=comment_id,
+            author_vk_id=9000 + comment_id,
+            author_name=f"Игрок {comment_id}",
+            author_screen_name=f"player{comment_id}",
+            text=f"Анкета персонажа {comment_id}",
+            created_at=123 + comment_id,
+            photos=(),
+            content_hash=str(comment_id) * 64,
+        )
+        for comment_id in range(1, 9)
+    }
+    analyzed_texts = []
+
+    async def fake_get_application(comment_id):
+        return applications[comment_id]
+
+    async def fake_generate_character(text, _image_urls):
+        analyzed_texts.append(text)
+        number = int(text.rsplit(" ", 1)[-1])
+        return CharacterDraft(
+            name=f"Персонаж {number}",
+            age=20 + number,
+            gender="Не указан",
+            appearance=f"Внешность {number}",
+            personality=f"Характер {number}",
+            biography=f"Биография {number}",
+            stress_resistance=3,
+            speech=3,
+            intuition=3,
+            spine=3,
+            will=3,
+            scent=3,
+            skills=["Навык"],
+            additional="",
+        )
+
+    monkeypatch.setattr(
+        read_tools.vk_discussion_service, "get_application", fake_get_application
+    )
+    monkeypatch.setattr(
+        read_tools.ai_service, "generate_character", fake_generate_character
+    )
+
+    result, attachment = await read_tools._run_read_tool(
+        session,
+        "analyze_discussion_applications",
+        {"comment_ids": list(range(1, 9))},
+    )
+
+    assert attachment is None
+    assert result["requested"] == 8
+    assert result["analyzed"] == 8
+    assert result["all_analyzed"] is True
+    assert len(result["items"]) == 8
+    assert len(analyzed_texts) == 8
+    assert [
+        item["suggested_import_action"]["arguments"]["comment_id"]
+        for item in result["items"]
+    ] == list(range(1, 9))
+
+
+@pytest.mark.asyncio
+async def test_eight_discussion_imports_fit_one_atomic_plan(session, monkeypatch):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    applications = {
+        comment_id: DiscussionApplication(
+            group_id=240214251,
+            topic_id=68811646,
+            comment_id=comment_id,
+            author_vk_id=10000 + comment_id,
+            author_name=f"Игрок {comment_id}",
+            author_screen_name=f"player{comment_id}",
+            text=f"Анкета {comment_id}",
+            created_at=123 + comment_id,
+            photos=(),
+            content_hash=f"{comment_id:064d}",
+        )
+        for comment_id in range(1, 9)
+    }
+
+    async def fake_get_application(comment_id):
+        return applications[comment_id]
+
+    monkeypatch.setattr(
+        write_tools.vk_discussion_service, "get_application", fake_get_application
+    )
+    actions = [
+        {
+            "name": "character_import_discussion",
+            "arguments": {
+                "comment_id": comment_id,
+                "name": f"Персонаж {comment_id}",
+                "fields": {
+                    "age": 20 + comment_id,
+                    "gender": "Не указан",
+                    "appearance": f"Внешность {comment_id}",
+                    "personality": f"Характер {comment_id}",
+                    "biography": f"Биография {comment_id}",
+                    "stress_resistance": 3,
+                    "speech": 3,
+                    "intuition": 3,
+                    "spine": 3,
+                    "will": 3,
+                    "scent": 3,
+                    "skills": "➤ Навык",
+                    "additional": "",
+                    "is_approved": True,
+                },
+                "include_photos": True,
+            },
+            "description": f"Импортировать персонажа {comment_id}",
+        }
+        for comment_id in range(1, 9)
+    ]
+    plan = await service.create_plan(
+        session,
+        ai_session=ai_session,
+        admin_vk_id=500,
+        summary="Импортировать восемь анкет",
+        actions=actions,
+        warnings=[],
+    )
+
+    preview = format_plan(plan)
+    assert preview.count("Комментарий VK: #") == 8
+    assert "Биография 1" not in preview
+
+    executed, done = await service.confirm_plan(
+        session, plan_id=plan.id, admin_vk_id=500, peer_id=500
+    )
+
+    assert done is True
+    assert executed.status == "executed"
+    created = await characters_crud.list_characters(
+        session, limit=20, approved_only=False
+    )
+    assert len(created) == 8
+    assert {character.name for character in created} == {
+        f"Персонаж {comment_id}" for comment_id in range(1, 9)
+    }
+
+
+@pytest.mark.asyncio
+async def test_discussion_batch_rejects_more_than_plan_limit(session):
+    with pytest.raises(ValidationError, match="не больше 20"):
+        await read_tools._run_read_tool(
+            session,
+            "analyze_discussion_applications",
+            {"comment_ids": list(range(1, 22))},
+        )
+
+
+@pytest.mark.asyncio
+async def test_model_history_keeps_large_batch_observation(session):
+    ai_session = await service.open_session(
+        session, admin_vk_id=500, peer_id=500
+    )
+    observation = "пакет:" + "данные" * 7000
+    await admin_ai_crud.add_message(
+        session,
+        session_id=ai_session.id,
+        role="tool",
+        content=observation,
+        details={},
+    )
+
+    history = await sessions._model_history(session, ai_session.id)
+
+    assert history[-1]["content"] == observation
 
 
 @pytest.mark.asyncio

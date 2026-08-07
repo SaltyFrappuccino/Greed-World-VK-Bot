@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     dslab_model: str = "deepseek-v4-flash"
     dslab_vision_model: str = "gemini-2.5-flash-lite"
     dslab_max_tokens: int = 4000
-    dslab_agent_max_tokens: int = 8000
+    dslab_agent_max_tokens: int = 32000
     dslab_agent_timeout_seconds: float = 180.0
     dslab_agent_max_retries: int = 2
 

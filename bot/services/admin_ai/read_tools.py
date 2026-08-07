@@ -1,3 +1,4 @@
+import asyncio
 from difflib import SequenceMatcher
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,8 +39,12 @@ READ_TOOLS = {
     "query_database", "export_character", "export_character_cards",
     "export_registry", "create_backup",
     "list_discussion_applications", "get_discussion_application",
-    "analyze_discussion_application",
+    "analyze_discussion_application", "analyze_discussion_applications",
 }
+
+MAX_DISCUSSION_BATCH = 20
+DISCUSSION_ANALYSIS_CONCURRENCY = 3
+
 
 async def _run_read_tool(
     session: AsyncSession, name: str, arguments: dict[str, object]
@@ -210,6 +215,60 @@ async def _run_read_tool(
                 )
             )
         return {"total_comments": total, "offset": offset, "items": items}, None
+    if name == "analyze_discussion_applications":
+        raw_comment_ids = arguments.get("comment_ids")
+        if not isinstance(raw_comment_ids, list) or not raw_comment_ids:
+            raise ValidationError("Передайте непустой массив comment_ids.")
+        try:
+            comment_ids = [int(value) for value in raw_comment_ids]
+        except (TypeError, ValueError) as error:
+            raise ValidationError("Все comment_ids должны быть целыми числами.") from error
+        if len(comment_ids) > MAX_DISCUSSION_BATCH:
+            raise ValidationError(
+                f"За один пакет можно разобрать не больше {MAX_DISCUSSION_BATCH} анкет."
+            )
+        if len(set(comment_ids)) != len(comment_ids):
+            raise ValidationError("В comment_ids не должно быть повторов.")
+        if any(comment_id <= 0 for comment_id in comment_ids):
+            raise ValidationError("Все comment_ids должны быть больше нуля.")
+
+        prepared = []
+        for comment_id in comment_ids:
+            application = await vk_discussion_service.get_application(comment_id)
+            imported = await characters_crud.get_by_discussion_source(
+                session,
+                group_id=application.group_id,
+                topic_id=application.topic_id,
+                comment_id=application.comment_id,
+            )
+            owner_characters = await characters_crud.list_by_vk_id(
+                session, application.author_vk_id
+            )
+            prepared.append((application, imported, owner_characters))
+
+        semaphore = asyncio.Semaphore(DISCUSSION_ANALYSIS_CONCURRENCY)
+
+        async def analyze(item):
+            application, imported, owner_characters = item
+            async with semaphore:
+                draft = await ai_service.generate_character(
+                    application.text,
+                    [photo.url for photo in application.photos],
+                )
+            return _analyzed_discussion_data(
+                application,
+                imported_character=imported,
+                owner_characters=owner_characters,
+                draft=draft,
+            )
+
+        items = await asyncio.gather(*(analyze(item) for item in prepared))
+        return {
+            "requested": len(comment_ids),
+            "analyzed": len(items),
+            "all_analyzed": len(items) == len(comment_ids),
+            "items": items,
+        }, None
     if name in {"get_discussion_application", "analyze_discussion_application"}:
         application = await vk_discussion_service.get_application(
             _integer(arguments, "comment_id")
@@ -234,18 +293,12 @@ async def _run_read_tool(
                 application.text,
                 [photo.url for photo in application.photos],
             )
-            fields = ai_service.character_fields(draft)
-            name_value = str(fields.pop("name"))
-            data["parsed_character"] = {"name": name_value, "fields": fields}
-            data["suggested_import_action"] = {
-                "name": "character_import_discussion",
-                "arguments": {
-                    "comment_id": application.comment_id,
-                    "name": name_value,
-                    "fields": fields,
-                    "include_photos": True,
-                },
-            }
+            data = _analyzed_discussion_data(
+                application,
+                imported_character=imported,
+                owner_characters=owner_characters,
+                draft=draft,
+            )
         return data, None
     if name == "query_database":
         return await database_query_service.query_database(session, arguments), None
@@ -345,4 +398,34 @@ def _discussion_data(
         data["text"] = application.text
     else:
         data["text_preview"] = application.text[:300]
+    return data
+
+
+def _analyzed_discussion_data(
+    application,
+    *,
+    imported_character: Character | None,
+    owner_characters: list[Character],
+    draft,
+) -> dict[str, object]:
+    data = _discussion_data(
+        application,
+        imported_character=imported_character,
+        owner_characters=owner_characters,
+        include_text=False,
+    )
+    fields = ai_service.character_fields(draft)
+    name_value = str(fields.pop("name"))
+    data["parsed_character"] = {"name": name_value, "fields": fields}
+    data["eligible_for_import"] = imported_character is None
+    if imported_character is None:
+        data["suggested_import_action"] = {
+            "name": "character_import_discussion",
+            "arguments": {
+                "comment_id": application.comment_id,
+                "name": name_value,
+                "fields": fields,
+                "include_photos": True,
+            },
+        }
     return data

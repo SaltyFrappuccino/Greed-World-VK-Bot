@@ -250,6 +250,14 @@ def _action_preview(
         target = dict(plan.snapshot.get(f"trophy:{arguments['trophy_id']}", {}))
 
     fields = arguments.get("fields")
+    if name == "character_import_discussion":
+        field_count = len(fields) if isinstance(fields, dict) else 0
+        return [
+            f"Анкета: {arguments.get('name', 'без имени')}",
+            f"Комментарий VK: #{arguments.get('comment_id', '?')}",
+            f"Полей: {field_count}; арты из обсуждения: "
+            f"{'да' if arguments.get('include_photos', True) else 'нет'}",
+        ]
     if isinstance(fields, dict) and fields:
         return [
             f"{field}: {_display(target.get(field))} → {_display(value)}"

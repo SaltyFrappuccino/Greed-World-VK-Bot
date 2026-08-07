@@ -7,6 +7,11 @@ from bot.services.errors import PermissionDenied
 from bot.utils.formatters import vk_plain_text
 
 
+MAX_MODEL_HISTORY_MESSAGES = 40
+MAX_MODEL_HISTORY_MESSAGE_CHARS = 60_000
+MAX_MODEL_HISTORY_TOTAL_CHARS = 120_000
+
+
 async def open_session(
     session: AsyncSession, *, admin_vk_id: int, peer_id: int
 ) -> AdminAISession:
@@ -70,15 +75,16 @@ async def _owned_session(
 
 
 async def _model_history(session: AsyncSession, session_id: int) -> list[dict[str, str]]:
-    messages = await ai_crud.list_messages(session, session_id, limit=30)
+    messages = await ai_crud.list_messages(
+        session, session_id, limit=MAX_MODEL_HISTORY_MESSAGES
+    )
     result = []
     total = 0
     for message in reversed(messages):
-        content = message.content[-12000:]
-        if total + len(content) > 24000:
+        content = message.content[-MAX_MODEL_HISTORY_MESSAGE_CHARS:]
+        if total + len(content) > MAX_MODEL_HISTORY_TOTAL_CHARS:
             break
         role = "assistant" if message.role == "assistant" else "user"
         result.append({"role": role, "content": content})
         total += len(content)
     return list(reversed(result))
-
