@@ -7,6 +7,9 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 from bot.config import get_settings
 from bot.services.errors import ServiceError
 
+
+_BUNDLED_FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+
 WIDTH = 1200
 HEIGHT = 1600
 RENDER_VERSION = 7
@@ -332,26 +335,31 @@ def _font_paths() -> tuple[Path, Path]:
     settings = get_settings()
     regular = _first_font(
         settings.profile_card_font_regular,
+        _BUNDLED_FONT_DIR / "DejaVuSans.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arial.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
     )
     bold = _first_font(
         settings.profile_card_font_bold,
+        _BUNDLED_FONT_DIR / "DejaVuSans-Bold.ttf",
         "C:/Windows/Fonts/segoeuib.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     )
     return regular, bold
 
 
-def _first_font(*candidates: str | None) -> Path:
+def _first_font(*candidates: str | Path | None) -> Path:
     for raw_path in candidates:
         if raw_path and Path(raw_path).is_file():
             return Path(raw_path)
     raise ServiceError(
-        "Не найден шрифт с поддержкой кириллицы. Укажите PROFILE_CARD_FONT_REGULAR "
-        "и PROFILE_CARD_FONT_BOLD в .env."
+        "Не найден встроенный или системный шрифт с поддержкой кириллицы."
     )

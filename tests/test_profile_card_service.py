@@ -6,6 +6,7 @@ from PIL import Image
 
 from bot.database.crud import characters as characters_crud
 from bot.services import profile_card_service, profile_card_storage_service
+from bot.services import profile_card_renderer
 from bot.services.profile_card_renderer import (
     RATING_COLORS,
     STAT_LABELS,
@@ -50,6 +51,24 @@ def test_renderer_creates_portrait_png_with_cyrillic() -> None:
 def test_each_stat_and_rating_has_its_own_color() -> None:
     assert len({color for _, _, color in STAT_LABELS}) == 6
     assert len(set(RATING_COLORS.values())) == len(RATING_COLORS)
+
+
+def test_bundled_cyrillic_fonts_are_used_without_env(monkeypatch) -> None:
+    monkeypatch.setattr(
+        profile_card_renderer,
+        "get_settings",
+        lambda: SimpleNamespace(
+            profile_card_font_regular=None,
+            profile_card_font_bold=None,
+        ),
+    )
+
+    regular, bold = profile_card_renderer._font_paths()
+
+    assert regular.name == "DejaVuSans.ttf"
+    assert bold.name == "DejaVuSans-Bold.ttf"
+    assert regular.is_file()
+    assert bold.is_file()
 
 
 @pytest.mark.asyncio
