@@ -52,6 +52,7 @@ async def show_cards_menu(message: Message, **_: object) -> None:
 @labeler.message(payload={"cmd": "admin_database_backup"})
 async def create_database_backup(message: Message, **_: object) -> None:
     await message.answer("Создаю и проверяю бэкап БД…")
+    backup = None
     try:
         backup = await backup_service.create_database_backup()
         uploader = DocMessagesUploader(
@@ -67,8 +68,15 @@ async def create_database_backup(message: Message, **_: object) -> None:
         return
     except Exception:
         logger.exception("Не удалось загрузить бэкап БД в VK")
+        stored_note = (
+            f" Проверенная копия сохранена на сервере: {backup.stored_path}."
+            if backup is not None and backup.stored_path is not None
+            else ""
+        )
         await message.answer(
-            "Бэкап создан, но VK не принял файл. Проверьте права сообщества на документы.",
+            "Бэкап создан, но VK не принял файл."
+            + stored_note
+            + " Проверьте права сообщества на документы.",
             keyboard=back_to_admin(),
         )
         return

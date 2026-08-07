@@ -16,7 +16,8 @@ load_dotenv()
 config.set_main_option(
     "sqlalchemy.url",
     resolve_database_url(
-        os.getenv("DATABASE_URL", "sqlite:///./zhadny_mir.db")
+        os.getenv("DATABASE_URL", "sqlite:///./zhadny_mir.db"),
+        os.getenv("DATA_DIR"),
     ).replace("%", "%%"),
 )
 target_metadata = Base.metadata

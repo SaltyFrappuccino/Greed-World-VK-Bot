@@ -8,6 +8,7 @@ from bot.config import get_settings
 from bot.database.models import Base
 
 _settings = get_settings()
+_settings.ensure_runtime_directories()
 
 engine = create_async_engine(_settings.async_database_url, future=True)
 

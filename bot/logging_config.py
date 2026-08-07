@@ -27,9 +27,9 @@ def configure_logging(settings: Settings) -> None:
 
     if not settings.log_file.strip():
         return
-    log_path = Path(settings.log_file).expanduser()
-    if not log_path.is_absolute():
-        log_path = Path(__file__).resolve().parent.parent / log_path
+    log_path = settings.log_path
+    if log_path is None:
+        return
     log_path.parent.mkdir(parents=True, exist_ok=True)
     resolved = log_path.resolve()
     if any(

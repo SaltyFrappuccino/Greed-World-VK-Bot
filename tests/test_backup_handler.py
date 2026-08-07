@@ -38,3 +38,25 @@ async def test_backup_handler_uploads_database_as_vk_document(monkeypatch):
     await panel.create_database_backup(message)
 
     assert message.answers[-1][1]["attachment"] == "doc-1_2_key"
+
+
+@pytest.mark.asyncio
+async def test_backup_handler_reports_persistent_copy_when_vk_rejects_upload(
+    monkeypatch, tmp_path
+):
+    stored_path = tmp_path / "backups" / "backup.db"
+
+    async def fake_backup():
+        return DatabaseBackup("backup.db", b"sqlite-data", stored_path)
+
+    class _FailingUploader(_FakeUploader):
+        async def upload(self, data, **kwargs):
+            raise ValueError("empty VK upload response")
+
+    monkeypatch.setattr(panel.backup_service, "create_database_backup", fake_backup)
+    monkeypatch.setattr(panel, "DocMessagesUploader", _FailingUploader)
+    message = _FakeMessage()
+
+    await panel.create_database_backup(message)
+
+    assert str(stored_path) in message.answers[-1][0]

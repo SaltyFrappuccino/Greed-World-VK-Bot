@@ -1,3 +1,4 @@
+import shutil
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -12,8 +13,29 @@ _ASYNC_DRIVERS = {
 }
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-def resolve_database_url(database_url: str) -> str:
-    """Привязать относительный SQLite-файл к корню проекта, а не к cwd."""
+
+
+def resolve_data_dir(data_dir: str | Path | None = None) -> Path:
+    """Корень постоянных данных: DATA_DIR на хостинге, проект локально."""
+    if data_dir is None or not str(data_dir).strip():
+        return _PROJECT_ROOT
+    path = Path(data_dir).expanduser()
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    return path.resolve()
+
+
+def resolve_data_path(path_value: str | Path, data_dir: str | Path | None = None) -> Path:
+    path = Path(path_value).expanduser()
+    if not path.is_absolute():
+        path = resolve_data_dir(data_dir) / path
+    return path.resolve()
+
+
+def resolve_database_url(
+    database_url: str, data_dir: str | Path | None = None
+) -> str:
+    """Привязать относительный SQLite-файл к каталогу постоянных данных."""
     scheme, separator, path_text = database_url.partition(":///")
     if not separator or scheme not in {"sqlite", "sqlite+aiosqlite"}:
         return database_url
@@ -23,7 +45,7 @@ def resolve_database_url(database_url: str) -> str:
     database_path = Path(path_text)
     if database_path.is_absolute():
         return database_url
-    resolved = (_PROJECT_ROOT / database_path).resolve()
+    resolved = resolve_data_path(database_path, data_dir)
     return f"{scheme}:///{resolved.as_posix()}"
 
 
@@ -41,7 +63,9 @@ class Settings(BaseSettings):
 
     admin_vk_ids: Annotated[list[int], NoDecode] = []
 
+    data_dir: str | None = None
     database_url: str = "sqlite:///./zhadny_mir.db"
+    backup_storage_dir: str = "backups"
 
     character_art_storage_dir: str = "storage/character_art"
     character_art_max_file_bytes: int = 20 * 1024 * 1024
@@ -86,7 +110,7 @@ class Settings(BaseSettings):
         В .env лежит обычная синхронная строка (так её понимают alembic и
         внешние инструменты), а движок бота работает асинхронно.
         """
-        database_url = resolve_database_url(self.database_url)
+        database_url = resolve_database_url(self.database_url, self.data_dir)
         scheme, _, rest = database_url.partition("://")
         if "+" in scheme:
             return database_url
@@ -94,17 +118,81 @@ class Settings(BaseSettings):
 
     @property
     def character_art_storage_path(self) -> Path:
-        path = Path(self.character_art_storage_dir)
-        if not path.is_absolute():
-            path = _PROJECT_ROOT / path
-        return path.resolve()
+        return resolve_data_path(self.character_art_storage_dir, self.data_dir)
 
     @property
     def profile_card_storage_path(self) -> Path:
-        path = Path(self.profile_card_storage_dir)
-        if not path.is_absolute():
-            path = _PROJECT_ROOT / path
-        return path.resolve()
+        return resolve_data_path(self.profile_card_storage_dir, self.data_dir)
+
+    @property
+    def backup_storage_path(self) -> Path:
+        return resolve_data_path(self.backup_storage_dir, self.data_dir)
+
+    @property
+    def data_path(self) -> Path:
+        return resolve_data_dir(self.data_dir)
+
+    @property
+    def log_path(self) -> Path | None:
+        if not self.log_file.strip():
+            return None
+        return resolve_data_path(self.log_file, self.data_dir)
+
+    def ensure_runtime_directories(self) -> None:
+        """Подготовить каталоги, которые должны переживать перезапуск контейнера."""
+        self.migrate_legacy_runtime_data()
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        self.character_art_storage_path.mkdir(parents=True, exist_ok=True)
+        self.profile_card_storage_path.mkdir(parents=True, exist_ok=True)
+        self.backup_storage_path.mkdir(parents=True, exist_ok=True)
+        if self.log_path is not None:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        database_url = resolve_database_url(self.database_url, self.data_dir)
+        scheme, separator, path_text = database_url.partition(":///")
+        if (
+            separator
+            and scheme in {"sqlite", "sqlite+aiosqlite"}
+            and path_text != ":memory:"
+        ):
+            Path(path_text).parent.mkdir(parents=True, exist_ok=True)
+
+    def migrate_legacy_runtime_data(self) -> None:
+        """Один раз скопировать старые относительные файлы из корня приложения."""
+        if self.data_dir is None or not self.data_dir.strip():
+            return
+
+        scheme, separator, path_text = self.database_url.partition(":///")
+        if separator and scheme in {"sqlite", "sqlite+aiosqlite"}:
+            database_path = Path(path_text)
+            if path_text != ":memory:" and not database_path.is_absolute():
+                self._copy_legacy_file(database_path)
+
+        self._copy_legacy_directory(Path(self.character_art_storage_dir))
+        self._copy_legacy_directory(Path(self.profile_card_storage_dir))
+        self._copy_legacy_directory(Path(self.backup_storage_dir))
+        if self.log_file.strip():
+            self._copy_legacy_file(Path(self.log_file))
+
+    def _copy_legacy_file(self, relative_path: Path) -> None:
+        if relative_path.is_absolute():
+            return
+        source = (_PROJECT_ROOT / relative_path).resolve()
+        target = (self.data_path / relative_path).resolve()
+        if source == target or not source.is_file() or target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    def _copy_legacy_directory(self, relative_path: Path) -> None:
+        if relative_path.is_absolute():
+            return
+        source = (_PROJECT_ROOT / relative_path).resolve()
+        target = (self.data_path / relative_path).resolve()
+        if source == target or not source.is_dir() or target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target)
 
     def is_admin(self, vk_id: int) -> bool:
         return vk_id in self.admin_vk_ids
